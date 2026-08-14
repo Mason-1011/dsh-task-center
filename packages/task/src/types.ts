@@ -1,7 +1,7 @@
 /**
- * Pure task vocabulary types: ids, status, operations, views, and the two
- * session-event metas. Types only, no runtime code.
- * Spec: docs/design/05-seam-spec.md (this file is its §2 translation).
+ * Pure task vocabulary types: ids, status, mutations, views, and the event
+ * metas of both ledgers. Types only, no runtime code.
+ * Spec: docs/design/05-seam-spec.md (this file is its §1–§3 translation).
  * @module @task-center/task/types
  */
 
@@ -17,7 +17,7 @@ export type TaskEventId = Branded<'TaskEventId'>
 /** Task lifecycle states. Archived tasks keep their status and move to the domain-global archive set. */
 export type TaskStatus = 'todo' | 'active' | 'blocked' | 'review' | 'done'
 
-/** State-changing verbs. Closed union; see the transition table in 05-seam-spec.md §1. */
+/** State-changing verbs. Closed union; see the transition table in fold.ts. */
 export type TaskOperation =
   | 'create'
   | 'edit'
@@ -31,7 +31,7 @@ export type TaskOperation =
   | 'wake-set'
   | 'wake-clear'
 
-/** Structured block/reject reason, mirroring the goal block-reason shape. */
+/** Structured block reason, mirroring the goal block-reason shape. */
 export interface TaskReason {
   readonly code: string
   readonly message: string
@@ -43,7 +43,21 @@ export type WakeRule =
   | { readonly kind: 'at'; readonly scheduledAt: string }
   | { readonly kind: 'every'; readonly everySeconds: number; readonly anchorAt: string }
 
-/** Durable task record stored in the task domain (02-data-model.md §1). */
+/** One mutation request. Discriminated union over the operation verbs. */
+export type TaskMutation =
+  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly workspaceIds?: readonly string[] }
+  | { readonly operation: 'edit'; readonly objective?: string; readonly acceptance?: string }
+  | { readonly operation: 'claim' }
+  | { readonly operation: 'progress'; readonly note: string; readonly next?: string }
+  | { readonly operation: 'block'; readonly reason: TaskReason }
+  | { readonly operation: 'submit'; readonly completionNote: string }
+  | { readonly operation: 'approve' }
+  | { readonly operation: 'reject'; readonly reason: string }
+  | { readonly operation: 'abandon' }
+  | { readonly operation: 'wake-set'; readonly rule: WakeRule }
+  | { readonly operation: 'wake-clear' }
+
+/** Durable task state, derived by folding the domain event stream. */
 export interface TaskRecord {
   readonly id: TaskId
   readonly revision: number
@@ -51,6 +65,8 @@ export interface TaskRecord {
   readonly acceptance: string
   readonly status: TaskStatus
   readonly blockedReason?: TaskReason
+  /** The live claiming session; absent while unclaimed, done, or abandoned. */
+  readonly holder?: SessionId
   readonly workspaceIds: readonly string[]
   readonly sessionIds: readonly SessionId[]
   readonly contextPack: string
@@ -60,12 +76,10 @@ export interface TaskRecord {
   readonly updatedAt: string
 }
 
-/** Read-only projection served by `ctx.tasks`, with derived fields. */
+/** Read-only projection served by `ctx.tasks`, with derived flags. */
 export interface TaskView {
   readonly record: TaskRecord
-  /** Live claiming session, present only while status is active/blocked. */
-  readonly holder?: SessionId
-  /** True while blocked longer than the configured alert threshold. */
+  /** True while blocked longer than the alert threshold (P1; always false in S1). */
   readonly blockedOverdue: boolean
   readonly archived: boolean
 }
@@ -76,13 +90,15 @@ export type TaskActor =
   | { readonly kind: 'human' }
   | { readonly kind: 'wake' }
 
-/** Snapshot-style session-event receipt written when a session's model mutates a task (05 §2). */
+/** Snapshot-style session-event receipt for a session's model-initiated change (05 §2). */
 export interface TaskSnapshotChangeMeta {
   readonly kind: 'task/change'
   readonly version: 1
   readonly operation: TaskOperation
   readonly taskId: TaskId
   readonly revision: number
+  /** The mutation that committed — the receipt replays without the domain ledger. */
+  readonly mutation: TaskMutation
   readonly task: TaskView
 }
 

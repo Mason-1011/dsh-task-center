@@ -6,11 +6,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -b packages/task",
+    "typecheck": "tsc -p packages/task",
     "test": "vitest run"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@types/node": "^24.0.0",
     "typescript": "^5.9.0-beta",
     "vitest": "^3.0.0"
   }
