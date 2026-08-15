@@ -6,7 +6,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc -p packages/task",
+    "typecheck": "tsc -p packages/task && tsc -p packages/task-local",
     "test": "vitest run"
   },
   "devDependencies": {

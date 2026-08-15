@@ -12,12 +12,11 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { applyMutation, foldTasks } from './fold.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
+import { TaskId } from './types.ts'
 import type {
   TaskActor,
   TaskContextInjectedMeta,
   TaskError,
-  TaskEventId,
-  TaskId,
   TaskMutation,
   TaskOperation,
   TaskSnapshotChangeMeta,
@@ -26,20 +25,10 @@ import type {
   WakeRule,
 } from './types.ts'
 
-export type * from './types.ts'
+export * from './types.ts'
 export { foldTasks, applyMutation, TRANSITIONS, appendPackLine } from './fold.ts'
 export { MemoryTaskStore } from './store.ts'
-export type { TaskStore } from './store.ts'
-
-/** Brand a string as a {@link TaskId}; owning-package factory. */
-export function TaskId(id: string): TaskId {
-  return id as TaskId
-}
-
-/** Brand a string as a {@link TaskEventId}; owning-package factory. */
-export function TaskEventId(id: string): TaskEventId {
-  return id as TaskEventId
-}
+export type { TaskStore, TaskEventInput } from './store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -113,7 +102,6 @@ export class TaskService extends Service {
   static inject = [] as const
 
   private store: TaskStore = new MemoryTaskStore()
-  private eventCounter = 0
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'tasks')
@@ -229,7 +217,7 @@ export class TaskService extends Service {
       kind: 'task/change', version: 1,
       operation: mutation.operation, taskId, revision: result.ok.revision, mutation, task: view,
     }
-    this.store.append({ eventId: TaskEventId(`${++this.eventCounter}`), taskId, revision: result.ok.revision, actor, at, change })
+    await this.store.append({ taskId, revision: result.ok.revision, actor, at, change })
     this.ctx.emit('task/changed', { operation: mutation.operation, task: view })
     if (actor.kind === 'model' && session !== undefined) session.append('task/change', change)
     return view

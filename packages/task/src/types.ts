@@ -1,6 +1,8 @@
 /**
  * Pure task vocabulary types: ids, status, mutations, views, and the event
- * metas of both ledgers. Types only, no runtime code.
+ * metas of both ledgers. Types plus the two brand-cast factories — like dsh's
+ * SessionId, a compile-time cast is the whole runtime, so the factory lives
+ * beside its type to export one merged symbol.
  * Spec: docs/design/05-seam-spec.md (this file is its §1–§3 translation).
  * @module @task-center/task/types
  */
@@ -11,8 +13,26 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 /** Stable task identity, unique within the task domain. */
 export type TaskId = Branded<'TaskId'>
 
+/**
+ * Brand a string as a {@link TaskId}.
+ * @param id - the raw task id string.
+ * @returns the same string, branded (a compile-time cast — no runtime cost).
+ */
+export function TaskId(id: string): TaskId {
+  return id as TaskId
+}
+
 /** Monotonic task-domain event identity, unique within the domain event stream. */
 export type TaskEventId = Branded<'TaskEventId'>
+
+/**
+ * Brand a string as a {@link TaskEventId}.
+ * @param id - the raw event id string.
+ * @returns the same string, branded (a compile-time cast — no runtime cost).
+ */
+export function TaskEventId(id: string): TaskEventId {
+  return id as TaskEventId
+}
 
 /** Task lifecycle states. Archived tasks keep their status and move to the domain-global archive set. */
 export type TaskStatus = 'todo' | 'active' | 'blocked' | 'review' | 'done'
