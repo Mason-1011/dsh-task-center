@@ -105,6 +105,10 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
   if (humanOnly.includes(mutation.operation) && actor.kind === 'model') {
     return error('TASK_FORBIDDEN', 'approve and reject are human-only operations')
   }
+  // 'already claimed' subsumes 'not legal from todo': a held task is never in todo.
+  if (mutation.operation === 'claim' && record.holder !== undefined) {
+    return error('TASK_ALREADY_CLAIMED', 'task already has a live holder')
+  }
   const rule = TRANSITIONS[mutation.operation]
   if (!rule.from.includes(record.status)) {
     return error('TASK_INVALID_TRANSITION', `${mutation.operation} is not legal from status ${record.status}`)
@@ -119,9 +123,6 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
   const next: Draft<TaskRecord> = { ...record, revision: record.revision + 1, updatedAt: context.at }
   switch (mutation.operation) {
     case 'claim': {
-      if (record.holder !== undefined) {
-        return error('TASK_ALREADY_CLAIMED', 'task already has a live holder')
-      }
       next.status = 'active'
       if (actor.kind === 'model') {
         next.holder = actor.sessionId
@@ -133,7 +134,8 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       if (mutation.note.trim() === '') return error('TASK_INVALID_NOTE', 'note must not be empty')
       next.status = 'active'
       delete next.blockedReason
-      next.contextPack = appendPackLine(record.contextPack, `- ${context.at} ${mutation.note}`, context.packByteLimit)
+      const planned = mutation.next !== undefined && mutation.next.trim() !== '' ? ` (next: ${mutation.next})` : ''
+      next.contextPack = appendPackLine(record.contextPack, `- ${context.at} ${mutation.note}${planned}`, context.packByteLimit)
       break
     }
     case 'block': {

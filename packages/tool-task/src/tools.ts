@@ -1,0 +1,247 @@
+/**
+ * The five model tools over `ctx.tasks`: task_create, task_claim, task_update,
+ * task_report, task_query. Registered globally like tool-goal; every mutation
+ * runs as the calling agent's model actor, so the service writes both ledgers
+ * (domain event plus the session's task/change receipt).
+ * Spec: docs/design/05-seam-spec.md §6.
+ * @module @task-center/tool-task/src/tools
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Session } from '@deepseek-ai/dsh-session'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { TaskActor, TaskError, TaskStatus, TaskView } from '@task-center/task'
+import { TaskId as taskIdOf } from '@task-center/task'
+import {
+  internalError,
+  LIST_OUTPUT_SCHEMA,
+  renderValue,
+  TASK_OUTPUT_SCHEMA,
+  taskToolTask,
+  toolError,
+} from './view.ts'
+import type { TaskToolError, TaskToolListValue, TaskToolValue } from './view.ts'
+
+/** The calling agent's session, or the stable error when no agent called. */
+type Caller = { session: Session } | TaskToolError
+
+/** Resolve the calling agent's session; task tools never run outside an agent. */
+function caller(exec: ToolRunContext): Caller {
+  const agent: Agent | undefined = exec.agent
+  if (agent === undefined) return internalError()
+  return { session: agent.session }
+}
+
+/** Actor for every model-initiated mutation: this agent's session. */
+function actor(session: Session): TaskActor {
+  return { kind: 'model', sessionId: session.id }
+}
+
+/** Success view or mapped error of one service call. */
+function value(result: TaskView | TaskError): TaskToolValue {
+  return 'code' in result ? toolError(result) : taskToolTask(result)
+}
+
+/** Generic, args-only pending presentation shared by the task tools. */
+function present(title: string, kind: 'read' | 'other', rawInput?: unknown): GenericCallView {
+  return { card: 'generic', title, kind, ...rawInput === undefined ? {} : { rawInput } }
+}
+
+/** Stable guard values keeping their literal codes inside the closed union. */
+const missingReason = (): TaskToolError => ({ code: 'invalid_reason', message: 'outcome blocked requires a non-empty reason.' })
+const missingCompletionNote = (): TaskToolError => ({ code: 'invalid_note', message: 'outcome review requires a non-empty completion note.' })
+const badLimit = (): TaskToolError => ({ code: 'invalid_filter', message: 'limit must be a positive safe integer.' })
+
+const CREATE_DESCRIPTION =
+  'Create one durable task. Tasks outlive this chat: they are tracked across sessions until a human '
+  + 'approves or rejects the submitted work. objective states the outcome; acceptance lists the concrete '
+  + 'criteria a submitted result will be checked against — write them as verifiable statements.'
+
+const CLAIM_DESCRIPTION =
+  'Claim one todo task for this session and receive its full context pack. Read the pack before working: '
+  + 'it is the accumulated progress log from every previous session. Only the holding session may '
+  + 'progress, block, or submit; claim fails on a task another live session already holds.'
+
+const UPDATE_DESCRIPTION =
+  'Record one progress step on a task this session holds. note says what was just done; next optionally '
+  + 'states the immediately planned step. Both land in the task context pack for later sessions. '
+  + 'Sending progress also clears a blocked task.'
+
+const REPORT_DESCRIPTION =
+  'Report an outcome on a task this session holds. outcome blocked attaches a reason stating exactly '
+  + 'what is missing (a credential, a review, an external event); outcome review submits the completed '
+  + 'work with a completion note that checks each acceptance criterion. Humans then approve or reject.'
+
+const QUERY_DESCRIPTION =
+  'Query tasks by filter. Omit every filter to list current non-archived tasks. Use the exact id and '
+  + 'revision from the results for claim, update, and report calls.'
+
+/**
+ * Register the five task tools on `ctx`.
+ * @param ctx - Context carrying `tasks` and `tools`.
+ * @returns aggregate disposer removing all five registrations.
+ */
+export function registerTaskTools(ctx: Context): () => void {
+  const disposers: Array<() => void> = []
+  try {
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_create',
+      description: CREATE_DESCRIPTION,
+      parameters: {
+        objective: { type: 'string', required: true, description: 'Outcome the task exists to reach.' },
+        acceptance: {
+          type: 'string',
+          required: true,
+          description: 'Verifiable criteria a submitted result is checked against.',
+        },
+        workspace_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional workspaces this task spans.',
+        },
+      },
+      output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        const created = await ctx.tasks.create({
+          objective: args.objective,
+          acceptance: args.acceptance,
+          ...args.workspace_ids === undefined ? {} : { workspaceIds: args.workspace_ids },
+        }, actor(who.session))
+        return 'code' in created ? toolError(created) : taskToolTask(created.task)
+      },
+      presentCall: args => present('Create task', 'other', args.objective),
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_claim',
+      description: CLAIM_DESCRIPTION,
+      parameters: {
+        task_id: { type: 'string', required: true, description: 'Exact task id from task_create or task_query.' },
+      },
+      output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        return value(await ctx.tasks.claim(taskIdOf(args.task_id), who.session, actor(who.session)))
+      },
+      presentCall: args => present('Claim task', 'other', args.task_id),
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_update',
+      description: UPDATE_DESCRIPTION,
+      parameters: {
+        task_id: { type: 'string', required: true, description: 'Exact task id of the held task.' },
+        revision: {
+          type: 'number',
+          required: true,
+          description: 'Revision the caller last saw; a mismatch returns stale_revision.',
+        },
+        note: { type: 'string', required: true, description: 'What was just done; must be non-empty.' },
+        next: { type: 'string', description: 'Optional immediately planned step.' },
+      },
+      output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        return value(await ctx.tasks.mutate(taskIdOf(args.task_id), args.revision, {
+          operation: 'progress',
+          note: args.note,
+          ...args.next === undefined ? {} : { next: args.next },
+        }, actor(who.session), who.session))
+      },
+      presentCall: args => present('Update task', 'other', args.note),
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_report',
+      description: REPORT_DESCRIPTION,
+      parameters: {
+        task_id: { type: 'string', required: true, description: 'Exact task id of the held task.' },
+        revision: {
+          type: 'number',
+          required: true,
+          description: 'Revision the caller last saw; a mismatch returns stale_revision.',
+        },
+        outcome: {
+          type: 'string',
+          required: true,
+          enum: ['blocked', 'review'],
+          description: 'blocked parks the task with a reason; review submits it for human approval.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Required with outcome blocked: exactly what is missing to continue.',
+        },
+        completion_note: {
+          type: 'string',
+          description: 'Required with outcome review: the self-check against every acceptance criterion.',
+        },
+      },
+      output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        if (args.outcome === 'blocked') {
+          if (args.reason === undefined || args.reason.trim() === '') {
+            return missingReason()
+          }
+          return value(await ctx.tasks.mutate(taskIdOf(args.task_id), args.revision, {
+            operation: 'block',
+            reason: { code: 'blocked', message: args.reason },
+          }, actor(who.session), who.session))
+        }
+        if (args.completion_note === undefined || args.completion_note.trim() === '') {
+          return missingCompletionNote()
+        }
+        return value(await ctx.tasks.mutate(taskIdOf(args.task_id), args.revision, {
+          operation: 'submit',
+          completionNote: args.completion_note,
+        }, actor(who.session), who.session))
+      },
+      presentCall: args => present('Report task', 'other', args.outcome),
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_query',
+      description: QUERY_DESCRIPTION,
+      parameters: {
+        status: {
+          type: 'string',
+          enum: ['todo', 'active', 'blocked', 'review', 'done'],
+          description: 'Optional exact status filter.',
+        },
+        workspace_id: { type: 'string', description: 'Optional workspace filter.' },
+        limit: { type: 'number', description: 'Optional positive safe-integer result cap.' },
+      },
+      output: { schema: LIST_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        if (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit <= 0)) {
+          return badLimit()
+        }
+        return ctx.tasks.list({
+          ...args.status === undefined ? {} : { status: args.status as TaskStatus },
+          ...args.workspace_id === undefined ? {} : { workspaceId: args.workspace_id },
+          ...args.limit === undefined ? {} : { limit: args.limit },
+        }).map(taskToolTask)
+      },
+      presentCall: args => present('Query tasks', 'read', args.status),
+    })))
+  } catch (error) {
+    for (const dispose of disposers.reverse()) dispose()
+    throw error
+  }
+
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    for (const dispose of disposers.reverse()) dispose()
+  }
+}
