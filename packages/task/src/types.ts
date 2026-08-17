@@ -65,6 +65,7 @@ export type TaskOperation =
   | 'abandon'
   | 'wake-set'
   | 'wake-clear'
+  | 'patrol'
 
 /** Structured block reason, mirroring the goal block-reason shape. */
 export interface TaskReason {
@@ -94,6 +95,7 @@ export type TaskMutation =
   | { readonly operation: 'abandon' }
   | { readonly operation: 'wake-set'; readonly rule: WakeRule }
   | { readonly operation: 'wake-clear' }
+  | { readonly operation: 'patrol'; readonly note: string; readonly next?: string; readonly blocker?: string }
 
 /** Durable task state, derived by folding the domain event stream. */
 export interface TaskRecord {
@@ -114,6 +116,12 @@ export interface TaskRecord {
   readonly subtasks: readonly TaskId[]
   readonly createdAt: string
   readonly updatedAt: string
+  /**
+   * Last instant this task was *worked* — any operation except patrol and wake
+   * bookkeeping. Idleness reads this, so an observation-only patrol never
+   * refreshes a task away from the stale banner.
+   */
+  readonly workedAt: string
 }
 
 /** Read-only projection served by `ctx.tasks`, with derived flags. */

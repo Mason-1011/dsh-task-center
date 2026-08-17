@@ -24,9 +24,10 @@ export interface Config {
 }
 
 /**
- * Whole days one task has sat since its last domain event (`updatedAt`),
- * floored: sub-day idleness and clock skew both read 0.
- * @param at - the record's last-touch instant.
+ * Whole days one task has sat since it was last *worked* (`workedAt` — patrol
+ * and wake bookkeeping do not refresh it), floored: sub-day idleness and clock
+ * skew both read 0.
+ * @param at - the record's last-worked instant.
  * @param now - the render time.
  * @returns whole idle days.
  */
@@ -82,7 +83,7 @@ function isOpen(view: TaskView): boolean {
  * @returns whole effective idle days.
  */
 function effectiveIdle(ctx: Context, view: TaskView, now: Date): number {
-  let best = idleDays(view.record.updatedAt, now)
+  let best = idleDays(view.record.workedAt, now)
   const queue = [...view.record.subtasks]
   const seen = new Set<TaskId>([view.record.id])
   while (queue.length > 0) {
@@ -91,7 +92,7 @@ function effectiveIdle(ctx: Context, view: TaskView, now: Date): number {
     seen.add(id)
     const child = ctx.tasks.get(id)
     if (child === undefined) continue
-    best = Math.min(best, idleDays(child.record.updatedAt, now))
+    best = Math.min(best, idleDays(child.record.workedAt, now))
     queue.push(...child.record.subtasks)
   }
   return best

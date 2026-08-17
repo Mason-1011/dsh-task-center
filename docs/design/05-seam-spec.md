@@ -23,6 +23,7 @@
 | todo / active / blocked | `subtask-add` | 不变 | 挂接一个已存在的子任务;per-record 查重,跨记录守卫(存在/非自身/防环,见 §1.1)在服务提交层 | `TASK_SUBTASK_SELF` / `TASK_SUBTASK_CYCLE` / `TASK_SUBTASK_DUPLICATE` / `TASK_NOT_FOUND` |
 | todo / active / blocked | `subtask-remove` | 不变 | 解除已挂接的子任务;父子自身状态均不变 | `TASK_SUBTASK_NOT_CHILD` |
 | 任意 | `wake-set` / `wake-clear` | 不变 | 规则仿 schedule 记录形状;every 间隔有下限 | `TASK_WAKE_INVALID_RULE` |
+| todo / active / blocked / review | `patrol` | 不变 | 巡检观察:note 非空(现状),可选 next(下一步)/ blocker(卡点)写进 contextPack;不认领、不改状态与持有、**不刷新 workedAt**(搁置时钟不被观察重置) | `TASK_INVALID_NOTE` |
 
 并发控制:每次变更带 `revision` 比较并置换(仿 goal 的 `GOAL_STALE_REVISION`)。
 
@@ -32,6 +33,7 @@
 |---|---|---|---|---|
 | create / edit / abandon | ✓ | ✓ | **✗** | **✗** |
 | claim / progress / block / submit | ✓(限当前持有会话) | ✓ | **✗**(被拉起的会话以模型 actor 走工具面) | **✗** |
+| patrol | ✓(不限持有:巡检会话是任务的陌生人) | ✓ | **✗** | **✗** |
 | release | ✓(限当前持有会话) | ✓ | **✗** | ✓(仅死持有;存活判断在 task-reaper) |
 | subtask-add / subtask-remove | ✓(限父任务持有会话) | ✓ | **✗** | **✗** |
 | approve / reject | **✗** | ✓ | **✗** | **✗** |

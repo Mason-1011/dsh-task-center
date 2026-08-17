@@ -1,8 +1,9 @@
 /**
- * The six model tools over `ctx.tasks`: task_create, task_claim, task_update,
- * task_report, task_query, task_projects. Registered globally like tool-goal;
- * every mutation runs as the calling agent's model actor, so the service
- * writes both ledgers (domain event plus the session's task/change receipt).
+ * The seven model tools over `ctx.tasks`: task_create, task_claim, task_update,
+ * task_report, task_patrol, task_query, task_projects. Registered globally
+ * like tool-goal; every mutation runs as the calling agent's model actor, so
+ * the service writes both ledgers (domain event plus the session's
+ * task/change receipt).
  * Spec: docs/design/05-seam-spec.md §6.
  * @module @task-center/tool-task/src/tools
  */
@@ -79,6 +80,13 @@ const REPORT_DESCRIPTION =
   + 'what is missing (a credential, a review, an external event); outcome review submits the completed '
   + 'work with a completion note that checks each acceptance criterion. Humans then approve or reject.'
 
+const PATROL_DESCRIPTION =
+  'Record one observation on a task without working it: the daily patrol session refreshes where '
+  + 'every unfinished task stands. note states the current situation in one line; next optionally '
+  + 'states the immediately planned step; blocker optionally names what is stuck. The observation '
+  + 'lands in the task context pack but does NOT claim the task, change its status, or refresh its '
+  + 'idle clock — a shelved task stays visibly shelved. Legal while a task is held by another session.'
+
 const QUERY_DESCRIPTION =
   'Query tasks by filter. Omit every filter to list current non-archived tasks. parent_task_id instead '
   + 'lists that task\'s live children — use it to watch delegated subtasks. project_id narrows either '
@@ -91,9 +99,9 @@ const PROJECTS_DESCRIPTION =
   + 'project_id and never invent one.'
 
 /**
- * Register the six task tools on `ctx`.
+ * Register the seven task tools on `ctx`.
  * @param ctx - Context carrying `tasks` and `tools`.
- * @returns aggregate disposer removing all six registrations.
+ * @returns aggregate disposer removing all seven registrations.
  */
 export function registerTaskTools(ctx: Context): () => void {
   const disposers: Array<() => void> = []
@@ -244,6 +252,36 @@ export function registerTaskTools(ctx: Context): () => void {
         }, actor(who.session), who.session))
       },
       presentCall: args => present('Report task', 'other', args.outcome),
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_patrol',
+      description: PATROL_DESCRIPTION,
+      parameters: {
+        task_id: { type: 'string', required: true, description: 'Exact task id from task_query or the patrol inventory.' },
+        revision: {
+          type: 'number',
+          required: true,
+          description: 'Revision the caller last saw; a mismatch returns stale_revision.',
+        },
+        note: { type: 'string', required: true, description: 'One line on where the task currently stands; must be non-empty.' },
+        next: { type: 'string', description: 'Optional immediately planned step.' },
+        blocker: { type: 'string', description: 'Optional what is currently stuck, if anything.' },
+      },
+      output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
+      async execute(args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        // Patrol holds nothing and moves nothing: no holder requirement, and the
+        // seam keeps workedAt put so the observation cannot mask shelving.
+        return value(await ctx.tasks.mutate(taskIdOf(args.task_id), args.revision, {
+          operation: 'patrol',
+          note: args.note,
+          ...args.next === undefined ? {} : { next: args.next },
+          ...args.blocker === undefined ? {} : { blocker: args.blocker },
+        }, actor(who.session), who.session))
+      },
+      presentCall: args => present('Patrol task', 'other', args.note),
     })))
 
     disposers.push(ctx.tools.register(defineTool({

@@ -1,6 +1,6 @@
 # @task-center/tool-task
 
-**用途一句话**:任务接缝的模型面——六个任务工具加一段系统提示词"任务纪律",全局注册(形态 4,仿 tool-goal)。
+**用途一句话**:任务接缝的模型面——七个任务工具加一段系统提示词"任务纪律",全局注册(形态 4,仿 tool-goal)。
 
 ## Model Experience
 
@@ -12,14 +12,15 @@
 | `task_claim` | 认领并取回完整 contextPack | not_found / already_claimed |
 | `task_update` | 记一条进展(note / next),自动解除阻塞 | not_claimed / stale_revision / invalid_note |
 | `task_report` | 上报结果:blocked(附理由)或 review(附对照 acceptance 的自检) | invalid_reason / invalid_note / invalid_transition |
+| `task_patrol` | 记一条巡检观察(note=现状,next=下一步?,blocker=卡点?)进 contextPack:不认领、不改状态、不刷新闲置时钟;他人持有的任务也可巡检 | stale_revision / invalid_note / invalid_transition |
 | `task_query` | 按 status / workspace_id / project_id / limit 过滤;parent_task_id 改列该任务的存活子任务 | invalid_filter / not_found |
 | `task_projects` | 列人类管理的项目(创建序,含归档标记)——project_id 只能用这里返回的精确 id,不许编 | — |
 
 **权限**:approve/reject 仅人类,项目的建/改/归档也仅人类——工具面不注册这些动词,且接缝在执行器里拒绝模型 actor(模型只能把任务**归入**已存在的项目)。
 
-**提示词**:system-prompt 段 `tool:task`(order 116):认领前读 pack、submit 必须逐条对照 acceptance、blocked 必须说清缺什么。
+**提示词**:system-prompt 段 `tool:task`(order 116):认领前读 pack、submit 必须逐条对照 acceptance、blocked 必须说清缺什么、patrol 只观察不动手。
 
-**Token/缓存影响**:六工具 schema + 一段静态提示词进入每次请求;contextPack 大小受接缝 `contextPackByteLimit` 约束(作用于完整值)。
+**Token/缓存影响**:七工具 schema + 一段静态提示词进入每次请求;contextPack 大小受接缝 `contextPackByteLimit` 约束(作用于完整值)。
 
 **会话日志**:模型的每次变更产生 `task/change` 回执,认领额外产生 `task/context-injected`(注入物全文可从日志重建)。
 

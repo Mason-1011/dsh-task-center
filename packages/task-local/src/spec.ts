@@ -34,7 +34,7 @@ const actor = z.discriminatedUnion('kind', [
 const taskOperation = z.enum([
   'create', 'claim', 'progress', 'block', 'submit', 'approve', 'reject', 'release',
   'subtask-add', 'subtask-remove',
-  'abandon', 'edit', 'wake-set', 'wake-clear',
+  'abandon', 'edit', 'wake-set', 'wake-clear', 'patrol',
 ] satisfies [TaskOperation, ...TaskOperation[]])
 
 /** The closed project operation set. */

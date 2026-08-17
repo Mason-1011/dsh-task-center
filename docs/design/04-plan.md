@@ -37,7 +37,7 @@
 |---|---|---|---|
 | 1 | **壳**:一条命令启动指挥中心(cordis.yml 经 Loader 的 REAL-composition + 交互 REPL + 常驻 wake/reaper/quota)——✅ 2026-08-17 | 全部前置 | 你本机一条命令进入可打字会话,`/task` 可用;keyless 冒烟快照(PTY 冒烟 + composition/repl 双测试经真实 Loader) |
 | 2 | **搁置可见性**:面板显示项目/任务闲置天数,最久搁置置顶标 ⚠——✅ 2026-08-17 | 2 | 面板测试(标记/横幅/阈值/委派不误报)+ composition 快照(经真实 Loader 渲染;落盘账本回拨 5 天重启后横幅仍在) |
-| 3 | **巡检例行**:复用 wake 的每日盘点会话,刷新各搁置项目"现状/下一步/卡点" | 2 | 无 key 闭环(假适配器)+ 真模型一次 |
+| 3 | **巡检例行**:复用 wake 的每日盘点会话,刷新各搁置项目"现状/下一步/卡点"——✅ 2026-08-17 | 2 | 无 key 闭环(假适配器)+ 真模型一次 |
 | 4 | **全速推进 `/task push`**:激活全部非阻塞待办并行干活,并发上限可配;撞墙由现有 quota 挂起+重置唤醒接管 | 3 | 并发守卫测试 + 真 key 小 e2e |
 | 5 | **第一个真实使用周**:录入你手头 2–3 个搁置项目实际用,修暴露的摩擦 | 1+2+3 | 产生真实完成任务 ≥1 件 |
 
@@ -70,3 +70,4 @@ backlog(不排期):任务间依赖动词(迁移交错场景)、webui 适配、�
 - [x] P1:项目分组·真模型闭环(project.e2e.spec.ts,8.7s)——2026-08-17:人类建「文档维护」项目,模型 task_projects 发现它、task_create 以列表返回的精确 id 归入、task_query 按项目收窄确认——模型全程没有编造 id
 - [x] 痛点计划·片 1「壳」——2026-08-17:`packages/shell`(`task-shell` 插件 + bin):一条命令 `corepack pnpm start [--root <目录>]` 经真实 Loader 组装 19 插件 cordis.yml(接缝 + 工具/命令面 + wake/quota/reaper 常驻),TTY 进 REPL(斜杠行走命令注册表、普通行进交互会话、事件流实时回显、`/exit` 处置退出),管道 stdin EOF 干净退出;修复 service 包缺 default export 导致原生 Loader 拒载;composition/repl 双测试经真实 Loader(shipped yml),PTY 冒烟建项目→归入→面板→落盘全通
 - [x] 痛点计划·片 2「搁置可见性」——2026-08-17:command-task 面板闲置天数(距最后一次域事件,满 1 天显示,仅未完结任务),项目组头与 `/task project` 列表按组内最长闲置聚合;`staleDays` 配置(默认 3)触发 `⚠ 搁置最久` 置顶横幅;闲置为子树感知口径——任一后代有更近动作即不闲,委派中的父任务不误报;composition 快照含落盘账本回拨 5 天重启后面板横幅照常(搁置不丢的完整持久链路)
+- [x] 痛点计划·片 3「巡检例行」——2026-08-17:域动词 `patrol`(todo/active/blocked/review 可用,done 拒绝;note=现状/next=下一步/blocker=卡点写 pack;不认领、不改状态、不刷新 workedAt——TaskRecord 新增 `workedAt` 由 fold 推导,闲置口径随之从 updatedAt 切换,巡检永远不把搁置洗白);七号工具 `task_patrol`(陌生人可巡检他人持有的任务);task-wake `patrol.at` 每日定时(错过即跳过,进程内存态判定,重启不补跑不重跑;额度墙退避顺延首火;无预检探测,失败包含不重试)起一个观察会话刷新全部未完结任务;验收双绿:无 key 闭环(假适配器发真实 tool-call 走 agent-loop 工具执行,`vi.useFakeTimers({toFake:['Date']})` 让真实 tick 读假钟跨过槽位)+ 真模型一次(patrol.e2e.spec.ts,6.7s,两个搁置任务各得一条现状/下一步观察,workedAt 纹丝不动)

@@ -191,6 +191,76 @@ describe('transition guards', () => {
   })
 })
 
+describe('patrol', () => {
+  /** Apply one mutation at an explicit instant (the shared helper pins `at`). */
+  function at(mutation: TaskMutation, record: TaskRecord | undefined, actor: TaskActor, instant: string): TaskRecord {
+    const result = applyMutation(record, mutation, { actor, at: instant, packByteLimit: packLimit })
+    if ('error' in result) throw new Error(result.error.code)
+    return result.ok
+  }
+
+  it('writes the observation line without touching status, holder, or workedAt', () => {
+    let record = created()
+    record = at({ operation: 'claim' }, record, actorModel, '2026-08-14T01:00:00Z')
+    const patrolled = applyMutation(record, { operation: 'patrol', note: 'still shelved', next: 'resume the port', blocker: 'waits on vendor' }, { actor: stranger(), at: '2026-08-20T00:00:00Z', packByteLimit: packLimit })
+    expect(patrolled).toEqual({
+      ok: expect.objectContaining({
+        status: 'active',
+        holder: record.holder,
+        workedAt: '2026-08-14T01:00:00Z',
+        updatedAt: '2026-08-20T00:00:00Z',
+      }),
+    })
+    if (!('ok' in patrolled)) throw new Error('narrowed')
+    expect(patrolled.ok.contextPack).toContain('PATROL: still shelved (next: resume the port) (blocked: waits on vendor)')
+  })
+
+  it('is legal from every unfinished status, by any session, but not from done', () => {
+    // todo → active → blocked → active → review each admit the observation; a
+    // stranger session patrols a held task — patrol holds nothing.
+    let record = created()
+    for (const mutation of [
+      { operation: 'patrol', note: 'fresh' },
+      { operation: 'claim' },
+      { operation: 'patrol', note: 'held and moving' },
+      { operation: 'block', reason: { code: 'X', message: 'y' } },
+      { operation: 'patrol', note: 'parked' },
+      { operation: 'progress', note: 'unblocked' },
+      { operation: 'submit', completionNote: 'done' },
+      { operation: 'patrol', note: 'awaiting review' },
+    ] as const) {
+      record = at(mutation, record, actorModel, '2026-08-14T01:00:00Z')
+    }
+    expect(record.status).toBe('review')
+    const approved = at({ operation: 'approve' }, record, actorHuman, '2026-08-14T02:00:00Z')
+    expect(applyMutation(approved, { operation: 'patrol', note: 'finished' }, { actor: stranger(), at: '2026-08-14T03:00:00Z', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_INVALID_TRANSITION', message: expect.any(String) } })
+  })
+
+  it('rejects empty notes and mechanical actors', () => {
+    const record = created()
+    expect(applyMutation(record, { operation: 'patrol', note: '  ' }, { actor: stranger(), at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_INVALID_NOTE', message: expect.any(String) } })
+    expect(applyMutation(record, { operation: 'patrol', note: 'x' }, { actor: { kind: 'wake' }, at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+    expect(applyMutation(record, { operation: 'patrol', note: 'x' }, { actor: { kind: 'system' }, at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+  })
+
+  it('keeps workedAt put across observations but refreshes it on work', () => {
+    let record = created()
+    expect(record.workedAt).toBe(record.createdAt)
+    record = at({ operation: 'wake-set', rule: { kind: 'after', afterSeconds: 60 } }, record, actorModel, '2026-08-15T00:00:00Z')
+    expect(record.workedAt).toBe(record.createdAt)
+    record = at({ operation: 'patrol', note: 'no movement' }, record, stranger(), '2026-08-16T00:00:00Z')
+    expect(record.workedAt).toBe(record.createdAt)
+    record = at({ operation: 'claim' }, record, actorModel, '2026-08-16T12:00:00Z')
+    expect(record.workedAt).toBe('2026-08-16T12:00:00Z')
+    record = at({ operation: 'progress', note: 'actually moved' }, record, actorModel, '2026-08-17T00:00:00Z')
+    expect(record.workedAt).toBe('2026-08-17T00:00:00Z')
+  })
+})
+
 describe('bounded context pack', () => {
   it('drops over-budget heads with a marker', () => {
     let pack = ''

@@ -45,6 +45,7 @@ export const TRANSITIONS: Readonly<Record<TaskOperation, TransitionRule>> = {
   edit: { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
   'wake-set': { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
   'wake-clear': { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
+  patrol: { from: ['todo', 'active', 'blocked', 'review'], to: 'same' },
 }
 
 /** Guard verdict: either the next record or a stable error code. */
@@ -136,6 +137,7 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       subtasks: [],
       createdAt: context.at,
       updatedAt: context.at,
+      workedAt: context.at,
     } }
   }
   const humanOnly: readonly TaskOperation[] = ['approve', 'reject']
@@ -168,7 +170,15 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
         || mutation.operation === 'subtask-add' || mutation.operation === 'subtask-remove')) {
     return error('TASK_NOT_CLAIMED', 'only the holding session may progress, block, submit, release, or decompose')
   }
-  const next: Draft<TaskRecord> = { ...record, revision: record.revision + 1, updatedAt: context.at }
+  // Patrol and wake bookkeeping observe or schedule; they do not work the task,
+  // so they leave `workedAt` put — the shelving clock must not be reset by them.
+  const observationOps: readonly TaskOperation[] = ['patrol', 'wake-set', 'wake-clear']
+  const next: Draft<TaskRecord> = {
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: context.at,
+    ...observationOps.includes(mutation.operation) ? {} : { workedAt: context.at },
+  }
   switch (mutation.operation) {
     case 'claim': {
       next.status = 'active'
@@ -260,6 +270,13 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     }
     case 'abandon': {
       delete next.holder
+      break
+    }
+    case 'patrol': {
+      if (mutation.note.trim() === '') return error('TASK_INVALID_NOTE', 'patrol requires a note')
+      const planned = mutation.next !== undefined && mutation.next.trim() !== '' ? ` (next: ${mutation.next})` : ''
+      const stuck = mutation.blocker !== undefined && mutation.blocker.trim() !== '' ? ` (blocked: ${mutation.blocker})` : ''
+      next.contextPack = appendPackLine(record.contextPack, `- ${context.at} PATROL: ${mutation.note}${planned}${stuck}`, context.packByteLimit)
       break
     }
   }

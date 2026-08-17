@@ -3,22 +3,25 @@
  * occurrence in the ledger first (one-shots clear, `every` advances its anchor
  * past now), fires a fresh session only for unheld tasks, and rejects invalid
  * config loudly. The fired session's LLM call fails here (no provider route)
- * — contained by design, which these tests also prove.
+ * — contained by design, which these tests also prove. The daily patrol gets
+ * the full keyless closed loop: a scripted adapter answers the patrol session
+ * with a real `task_patrol` tool call, proving observation never unshelves.
  * @module @task-center/task-wake/tests/wake
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import LlmRuntime, { LlmAdapter, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { CallId, LlmAdapter, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
+import { TaskId, TaskService } from '@task-center/task'
 import type { TaskHandle } from '@task-center/task'
+import * as ToolTask from '@task-center/tool-task'
 import * as TaskWake from '../src/index.ts'
 
 /** Boot the spine plus task-wake polling every 50ms with a dead provider route. */
@@ -166,5 +169,139 @@ describe('task-wake', () => {
     adapter.walled = false
     await until(() => ctx.tasks.get(handle.task.record.id)?.record.wakeRule === undefined)
     await until(() => ctx.agents.list().some(agent => agent.session.id.startsWith(`wake-${handle.task.record.id.slice(0, 8)}`)))
+  })
+
+  it('decides the patrol slot: pre-slot sighting arms it, a missed slot is skipped, one fire per day', () => {
+    const day = (hour: number, minute: number) => new Date(2026, 7, 17, hour, minute, 0, 0)
+    const slot = '10:00'
+    // Pre-slot ticks arm the day; crossing the slot fires exactly once.
+    expect(TaskWake.patrolDecision(slot, day(9, 59), '', '')).toBe('before-slot')
+    expect(TaskWake.patrolDecision(slot, day(10, 1), '2026-08-17', '')).toBe('due')
+    expect(TaskWake.patrolDecision(slot, day(10, 5), '2026-08-17', '2026-08-17')).toBe('passed')
+    // A process that first looks after the slot never saw the pre-slot moment:
+    // the day is skipped, not caught up.
+    expect(TaskWake.patrolDecision(slot, day(10, 1), '', '')).toBe('passed')
+    expect(TaskWake.patrolDecision(slot, day(10, 1), '2026-08-16', '')).toBe('passed')
+    // Yesterday's sighting does not carry over; the next day re-arms.
+    expect(TaskWake.patrolDecision(slot, day(9, 59), '2026-08-17', '2026-08-17')).toBe('before-slot')
+    expect(TaskWake.patrolDecision(slot, new Date(2026, 7, 18, 9, 59, 0, 0), '2026-08-18', '2026-08-17')).toBe('before-slot')
+    expect(TaskWake.patrolDecision(slot, new Date(2026, 7, 18, 10, 1, 0, 0), '2026-08-18', '2026-08-17')).toBe('due')
+    // Midnight slots still see their pre-slot window.
+    expect(TaskWake.patrolDecision('00:05', new Date(2026, 7, 18, 0, 1, 0, 0), '2026-08-18', '2026-08-17')).toBe('before-slot')
+    expect(TaskWake.patrolDecision('00:05', new Date(2026, 7, 18, 0, 6, 0, 0), '2026-08-18', '2026-08-17')).toBe('due')
+  })
+
+  it('rejects an off-clock patrol slot loudly at mount', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime, {})
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
+    await ctx.plugin(ToolTask)
+    await expect(ctx.plugin(TaskWake, {
+      pollSeconds: 1, agent: { provider: 'p', model: 'm' }, patrol: { at: '9:30' },
+    })).rejects.toThrow('patrol.at')
+    await expect(ctx.plugin(TaskWake, {
+      pollSeconds: 1, agent: { provider: 'p', model: 'm' }, patrol: { at: '24:00' },
+    })).rejects.toThrow('patrol.at')
+  })
+
+  it('runs the daily patrol through the timer: one session observes without claiming or unshelving', { timeout: 15_000 }, async () => {
+    /** The task the patrol session will observe, assigned once created. */
+    let taskId = ''
+    /**
+     * Route scripted per request: the patrol tool call first, then the summary.
+     */
+    class PatrolAdapter extends LlmAdapter {
+      calls = 0
+      firstInput = ''
+
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        this.calls++
+        if (this.calls === 1) {
+          const text = options.messages.find(message => message.role === 'user')?.content
+            .find(block => block.type === 'text')
+          if (text !== undefined && text.type === 'text') this.firstInput = text.text
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+          yield {
+            type: 'block-end', index: 0,
+            block: {
+              type: 'tool-call', id: CallId('patrol-1'), name: 'task_patrol',
+              arguments: JSON.stringify({
+                task_id: taskId, revision: 1,
+                note: 'parked since Monday', next: 'resume the store split',
+              }),
+            },
+          }
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: '巡检完成:1 个任务无进展。' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: '巡检完成:1 个任务无进展。' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime, {})
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
+    await ctx.plugin(ToolTask)
+    const adapter = new PatrolAdapter()
+    ctx.llm.registerAdapter(['patrol-route'], adapter)
+    await ctx.plugin(TaskWake, {
+      pollSeconds: 0.05,
+      agent: { provider: 'patrol-route', model: 'm' },
+      patrol: { at: '10:00' },
+    })
+    try {
+      const handle = await newTask(ctx)
+      taskId = handle.task.record.id
+
+      // Only the clock is faked (real timers keep the 50ms ticks alive): the
+      // ticks first sight today before the slot, then cross it.
+      const morning = new Date()
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(morning.getFullYear(), morning.getMonth(), morning.getDate(), 9, 59, 30))
+      await new Promise(resolve => setTimeout(resolve, 150))
+      vi.setSystemTime(new Date(morning.getFullYear(), morning.getMonth(), morning.getDate(), 10, 0, 30))
+
+      await until(() => ctx.tasks.get(TaskId(taskId))!.record.contextPack.includes('PATROL: parked since Monday'))
+      await until(() => adapter.calls >= 2)
+
+      // The inventory reached the model: header, exact id, and instruction.
+      expect(adapter.firstInput).toContain('[task-wake] 每日巡检')
+      expect(adapter.firstInput).toContain(taskId)
+      expect(adapter.firstInput).toContain('不要 task_claim')
+
+      // Observation only: no claim, no status move, no unshelving.
+      const record = ctx.tasks.get(TaskId(taskId))!.record
+      expect(record.status).toBe('todo')
+      expect(record.holder).toBeUndefined()
+      expect(record.workedAt).toBe(record.createdAt)
+      expect(record.contextPack).toContain('PATROL: parked since Monday (next: resume the store split)')
+
+      // The patrol session logged its own receipt — model-visible means logged.
+      const patrolAgent = ctx.agents.list().find(agent => agent.session.id.startsWith('patrol-'))
+      expect(patrolAgent).toBeDefined()
+      expect(patrolAgent!.session.events.some(event => event.type === 'task/change')).toBe(true)
+
+      // The rest of the day stays quiet: one patrol per local day.
+      const sessions = () => ctx.agents.list().filter(agent => agent.session.id.startsWith('patrol-'))
+      vi.setSystemTime(new Date(morning.getFullYear(), morning.getMonth(), morning.getDate(), 10, 30, 0))
+      await new Promise(resolve => setTimeout(resolve, 200))
+      expect(sessions()).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+      await ctx.fiber.dispose()
+    }
   })
 })

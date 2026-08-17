@@ -9,6 +9,10 @@
  * session is an ordinary model actor: it claims and works the task through
  * the task tools. The timer itself performs no work operations, per the
  * authority matrix.
+ *
+ * The same timer runs the daily patrol: once per local day at the configured
+ * slot, one fire-and-forget session refreshes the 现状/下一步/卡点 of every
+ * unfinished task through `task_patrol` — observation only, never work.
  * Spec: docs/design/03-plugins.md §2, 05-seam-spec.md §1 and §4.
  * @module @task-center/task-wake
  */
@@ -31,6 +35,39 @@ export interface Config {
   readonly pollSeconds: number
   /** Model route for fired sessions. Both fields required. */
   readonly agent: { readonly provider: string; readonly model: string }
+  /** Daily patrol target: local wall-clock `HH:MM`. Absent disables the patrol. */
+  readonly patrol?: { readonly at: string }
+}
+
+/** Local calendar day key `YYYY-MM-DD` of one instant. */
+function localDay(now: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/** Verdict of one patrol-slot check at tick time. */
+export type PatrolSignal = 'before-slot' | 'due' | 'passed'
+
+/**
+ * Decide the daily patrol at one tick. `before-slot` means the caller should
+ * record today as pre-slot-seen; `due` means fire now and record today as run;
+ * `passed` changes nothing. A process that first looks after the slot never
+ * saw today's pre-slot moment, so it waits for tomorrow — a missed slot is
+ * skipped, never caught up on boot.
+ * @param slot - the configured local `HH:MM`.
+ * @param now - the tick time.
+ * @param sawPreSlotDay - the day key this process last observed before a slot.
+ * @param ranDay - the day key the patrol last ran.
+ * @returns the signal for the caller to act on and record.
+ */
+export function patrolDecision(slot: string, now: Date, sawPreSlotDay: string, ranDay: string): PatrolSignal {
+  const [hours, minutes] = slot.split(':')
+  const slotMinutes = Number(hours) * 60 + Number(minutes)
+  const day = localDay(now)
+  if (now.getHours() * 60 + now.getMinutes() < slotMinutes) return 'before-slot'
+  if (day === ranDay) return 'passed'
+  if (sawPreSlotDay !== day) return 'passed'
+  return 'due'
 }
 
 /**
@@ -61,6 +98,50 @@ function injection(record: TaskRecord): string {
   ].join('\n')
 }
 
+/** First message of the daily patrol session: the inventory, then the instruction. */
+function patrolMessage(inventory: string): string {
+  return [
+    '[task-wake] 每日巡检:刷新所有未完结任务的现状。',
+    inventory,
+    '指令:对上面每个任务调用一次 task_patrol:note 用一句话写该任务现状;next 写下一步(如有);有卡点写 blocker。',
+    '不要 task_claim,不要改变任何任务状态,不要新建任务。完成后用一段话总结整体进展与最该被人类注意的事项。',
+  ].join('\n')
+}
+
+/**
+ * Start one patrol session over every unfinished task: the inventory line of
+ * each (exact id, revision, status, holder, idle days by `workedAt`, last pack
+ * line) followed by the observe-only instruction. Exported for e2e — the timer
+ * path waits for a wall-clock slot no test should.
+ * @param ctx - Context carrying `tasks` and `agentLoop`.
+ * @param config - The model route for the patrol session.
+ * @returns the session's idle promise, or undefined when nothing is unfinished.
+ */
+export function runPatrol(ctx: Context, config: Config): Promise<void> | undefined {
+  const open = ctx.tasks.list({}).filter(view => view.record.status !== 'done')
+  if (open.length === 0) return undefined
+  const projectNames = new Map(ctx.tasks.projects().map(view => [view.record.id, view.record.name] as const))
+  const now = Date.now()
+  const inventory = open.map(view => {
+    const { record } = view
+    const idle = Math.max(0, Math.floor((now - Date.parse(record.workedAt)) / 86_400_000))
+    const last = record.contextPack === '' ? '(尚无记录)' : record.contextPack.split('\n').at(-1)!
+    return [
+      `- 任务 id: ${record.id}(revision ${record.revision})`,
+      `  状态: ${record.status}${record.holder === undefined ? '' : ` · 持有会话 ${record.holder.slice(0, 8)}`} · 闲置 ${idle} 天${record.projectId === undefined ? '' : ` · 项目 ${projectNames.get(record.projectId) ?? record.projectId}`}`,
+      `  目标: ${record.objective}`,
+      `  最近记录: ${last}`,
+    ].join('\n')
+  }).join('\n')
+  const agent = ctx.agentLoop.create(SessionId(`patrol-${localDay(new Date())}-${Date.now()}`), config.agent)
+  const idle = agent.whenIdle()
+  agent.followup(createUserMessage({
+    content: [{ type: 'text', text: patrolMessage(inventory) }],
+    source: { kind: 'user' },
+  }))
+  return idle
+}
+
 /** Outcome of one preflight probe of the fired-session route. */
 interface Probe {
   /** Whether the route still reports quota exhaustion. */
@@ -82,6 +163,9 @@ export function apply(ctx: Context, config: Config): void {
   }
   if (config.agent.provider.trim() === '' || config.agent.model.trim() === '') {
     throw new Error('task-wake: agent.provider and agent.model must name the fired sessions\' route')
+  }
+  if (config.patrol !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(config.patrol.at)) {
+    throw new Error('task-wake: patrol.at must be local HH:MM on a 24-hour clock')
   }
   const logger = ctx.logger('task-wake')
 
@@ -144,9 +228,25 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   let probeHoldUntil = 0
+  let patrolSawPreSlotDay = ''
+  let patrolRanDay = ''
 
   const tick = async (): Promise<void> => {
     if (Date.now() < probeHoldUntil) return
+    if (config.patrol !== undefined) {
+      const now = new Date()
+      const signal = patrolDecision(config.patrol.at, now, patrolSawPreSlotDay, patrolRanDay)
+      if (signal === 'before-slot') {
+        patrolSawPreSlotDay = localDay(now)
+      } else if (signal === 'due') {
+        patrolRanDay = localDay(now)
+        const idle = runPatrol(ctx, config)
+        if (idle !== undefined) {
+          logger.info('firing patrol session')
+          void idle.catch(error => logger.warn('patrol session failed', { error }))
+        }
+      }
+    }
     let probed: Probe | undefined
     for (const due of ctx.tasks.wakeRules()) {
       const view = ctx.tasks.get(due.taskId)

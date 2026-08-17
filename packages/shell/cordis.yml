@@ -67,6 +67,8 @@
     agent:
       provider: deepseek-official
       model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
+    patrol:
+      at: '09:30'
 
 - id: task-quota
   name: '@task-center/task-quota'

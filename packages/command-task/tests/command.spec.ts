@@ -251,6 +251,36 @@ describe('command-task', () => {
     await expect(boot(0)).rejects.toThrow('staleDays')
   })
 
+  it('keeps the stale banner through a patrol: observations never unshelve', async () => {
+    const { ctx, agent } = await boot()
+    try {
+      const present = Date.now()
+      vi.useFakeTimers()
+      vi.setSystemTime(present - 4.5 * DAY_MS)
+      await dispatch(ctx, agent, '/task create 旧账 :: 数字全对')
+      vi.setSystemTime(present)
+      const view = ctx.tasks.list({}).find(task => task.record.objective === '旧账')!
+
+      // The patrol session is a stranger to the task; its observation lands in
+      // the pack but the idle clock keeps running.
+      const patrolled = await ctx.tasks.mutate(view.record.id, view.record.revision, {
+        operation: 'patrol', note: 'still parked', next: 'restart from the store split',
+      }, { kind: 'model', sessionId: SessionId('s-patrol') })
+      if ('code' in patrolled) throw new Error(patrolled.code)
+      expect(patrolled.record.workedAt).toBe(view.record.workedAt)
+
+      const panel = textOf(await dispatch(ctx, agent, '/task'))
+      expect(panel).toContain('⚠ 搁置最久(闲置 4 天)')
+      expect(panel).toContain('待办: 旧账 · 闲置 4 天')
+      // The observation itself is visible where it belongs: the pack.
+      const shown = textOf(await dispatch(ctx, agent, `/task show ${view.record.id.slice(0, 8)}`))
+      expect(shown).toContain('PATROL: still parked (next: restart from the store split)')
+    } finally {
+      vi.useRealTimers()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('panels blocked work first and filters by status', async () => {
     const { ctx, agent } = await boot()
     expect(textOf(await dispatch(ctx, agent, '/task'))).toBe('任务队列为空')

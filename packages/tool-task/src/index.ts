@@ -1,5 +1,5 @@
 /**
- * `tool-task`: the model face of the task seam. Registers the six task tools
+ * `tool-task`: the model face of the task seam. Registers the seven task tools
  * and one system-prompt discipline section, globally like tool-goal.
  * @module @task-center/tool-task
  */
@@ -41,10 +41,11 @@ const TASK_DISCIPLINE = [
   '- `task_report` with outcome `review` submits work for a human decision. The completion note must state, criterion by criterion, how the result satisfies `acceptance`.',
   '- `task_report` with outcome `blocked` parks the task. The reason must say exactly what is missing — a credential, a review, an external event — not that the work is merely hard.',
   '- Approving and rejecting submitted work is human-only. When a task you hold is rejected, its `contextPack` carries the rejection reason; resume from there.',
+  '- `task_patrol` records an observation without working the task: no claim, no status change, and the idle clock keeps running. Use it when asked to take stock of tasks you do not hold.',
 ].join('\n')
 
 /**
- * Register the task discipline section and the six tools.
+ * Register the task discipline section and the seven tools.
  * @param ctx - Plugin context.
  */
 export function apply(ctx: Context): void {

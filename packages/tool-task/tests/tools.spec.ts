@@ -13,6 +13,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TaskService } from '@task-center/task'
+import { TaskId } from '@task-center/task'
 import * as ToolTask from '../src/index.ts'
 import type { TaskToolError, TaskToolListValue, TaskToolProjectListValue, TaskToolTask, TaskToolValue } from '../src/index.ts'
 
@@ -58,10 +59,10 @@ async function fail(ctx: Context, name: string, args: unknown, exec = execOf()):
 }
 
 describe('tool-task', () => {
-  it('registers the five tools and no approval tool', async () => {
+  it('registers the six work tools plus patrol, and no approval tool', async () => {
     const { ctx } = await boot()
     const names = ctx.tools.schemas().map(schema => schema.name)
-    for (const name of ['task_create', 'task_claim', 'task_update', 'task_report', 'task_query', 'task_projects']) {
+    for (const name of ['task_create', 'task_claim', 'task_update', 'task_report', 'task_patrol', 'task_query', 'task_projects']) {
       expect(names).toContain(name)
     }
     // approve/reject stay human-only: the tool face never registers them.
@@ -122,6 +123,27 @@ describe('tool-task', () => {
     expect((await fail(ctx, 'task_report', { task_id: created.id, revision: claimed.revision, outcome: 'review' })).code).toBe('invalid_note')
     // A stranger session may not work a task this session holds.
     expect((await fail(ctx, 'task_update', { task_id: created.id, revision: claimed.revision, note: 'hi' }, execOf(strangerSession))).code).toBe('not_claimed')
+  })
+
+  it('patrols: a stranger observes a held task without claiming or unshelving it', async () => {
+    const { ctx } = await boot()
+    const created = await ok(ctx, 'task_create', { objective: 'port the ledger', acceptance: 'restart restores' })
+    const claimed = await ok(ctx, 'task_claim', { task_id: created.id })
+    expect((await fail(ctx, 'task_patrol', { task_id: created.id, revision: claimed.revision, note: '   ' })).code).toBe('invalid_note')
+
+    // Observation only: the shelving clock stays at the claim's instant
+    // (claim itself is work and refreshes workedAt — pin that, not create).
+    const workedAt = ctx.tasks.get(TaskId(created.id))!.record.workedAt
+    // The stranger session holds nothing; the patrol still lands.
+    const patrolled = await ok(ctx, 'task_patrol', {
+      task_id: created.id, revision: claimed.revision, note: 'parked since the port', next: 'resume from the store split', blocker: 'quota window',
+    }, execOf(strangerSession))
+    expect(patrolled.status).toBe('active')
+    expect(patrolled.holder).toBe(sessionId as never)
+    expect(patrolled.contextPack).toContain('PATROL: parked since the port (next: resume from the store split) (blocked: quota window)')
+    expect(ctx.tasks.get(TaskId(created.id))!.record.workedAt).toBe(workedAt)
+    // Stale revisions refuse, like every write tool.
+    expect((await fail(ctx, 'task_patrol', { task_id: created.id, revision: claimed.revision, note: 'again' }, execOf(strangerSession))).code).toBe('stale_revision')
   })
 
   it('delegates: create under a held parent, list children, withdraw on refused links', async () => {
