@@ -77,7 +77,23 @@ describe('task-local durability', () => {
     // The restarted stream continues: CAS against the restored revision.
     const submitted = await second.ctx.tasks.mutate(taskId, restored.record.revision, { operation: 'submit', completionNote: 'resumed' }, model, session)
     expect('code' in submitted).toBe(false)
+
+    // A system release (the reaper's verb) persists and restores across restart.
+    const secondTask = await second.ctx.tasks.create({ objective: 'dead hold', acceptance: 'system release survives' }, human)
+    if ('code' in secondTask) throw new Error(secondTask.code)
+    const secondClaimed = await second.ctx.tasks.claim(secondTask.task.record.id, session, model)
+    if ('code' in secondClaimed) throw new Error(secondClaimed.code)
+    const released = await second.ctx.tasks.mutate(secondTask.task.record.id, secondClaimed.record.revision, { operation: 'release' }, { kind: 'system' })
+    if ('code' in released) throw new Error(released.code)
     await shutdown(second.fibers)
+
+    const third = await boot(root)
+    const restoredRelease = third.ctx.tasks.get(secondTask.task.record.id)
+    if (restoredRelease === undefined) throw new Error('the system release did not survive the restart')
+    expect(restoredRelease.record.status).toBe('todo')
+    expect(restoredRelease.record.holder).toBeUndefined()
+    expect(restoredRelease.record.revision).toBe(released.record.revision)
+    await shutdown(third.fibers)
   })
 
   it('rejects a medium stamped with a different domain version', async () => {

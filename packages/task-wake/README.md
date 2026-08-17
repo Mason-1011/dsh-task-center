@@ -34,7 +34,7 @@
 ## Known Limitations and Deferred Work
 
 - `done` 任务不触发唤醒(`wakeRules` 跳过):周期性例程需要"完成即重生"或模板机制(P2)。
-- 崩溃恢复不释放死持有者持有的任务:release 动词已在状态机中(命令面可人工释放),自动探测持有会话存活并代释放留 P1。
+- 死持有的释放由 task-reaper 负责(会话处置事件 + 挂载清扫),本包不管存活。
 - 锚点推进失败(如 CAS 过期)只记日志跳过,不重试本周期。
 - 探测退避只认平台延时;平台不给延时时按 `pollSeconds` 重探,无法主动滑到窗口结束点。
 - 工具面暂不暴露 wake-set/wake-clear:模型走 `/task wake`/`/task nowake` 命令面;工具面补齐待 P1。

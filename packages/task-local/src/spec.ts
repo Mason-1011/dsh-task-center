@@ -23,11 +23,12 @@ const actor = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('model'), sessionId: z.string().transform(SessionId) }),
   z.object({ kind: z.literal('human') }),
   z.object({ kind: z.literal('wake') }),
+  z.object({ kind: z.literal('system') }),
 ])
 
 /** The closed operation set; the fold enforces each verb's transition rules. */
 const operation = z.enum([
-  'create', 'claim', 'progress', 'block', 'submit', 'approve', 'reject',
+  'create', 'claim', 'progress', 'block', 'submit', 'approve', 'reject', 'release',
   'abandon', 'edit', 'wake-set', 'wake-clear',
 ] satisfies [TaskOperation, ...TaskOperation[]])
 

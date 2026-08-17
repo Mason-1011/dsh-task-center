@@ -111,6 +111,7 @@ export type TaskActor =
   | { readonly kind: 'model'; readonly sessionId: SessionId }
   | { readonly kind: 'human' }
   | { readonly kind: 'wake' }
+  | { readonly kind: 'system' }
 
 /** Snapshot-style session-event receipt for a session's model-initiated change (05 §2). */
 export interface TaskSnapshotChangeMeta {

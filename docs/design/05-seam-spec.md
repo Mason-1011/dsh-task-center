@@ -24,14 +24,15 @@
 
 并发控制:每次变更带 `revision` 比较并置换(仿 goal 的 `GOAL_STALE_REVISION`)。
 
-**权限矩阵**(在执行器里强制,不靠 schema 省略——仓库规则"决策在做出决策的操作里强制"):
+**权限矩阵**(在执行器里强制,不靠 schema 省略——仓库规则"决策在做出决策的操作里强制";机械 actor 被钉死在自己的簿记动词上,存活/到点判断在账本之外的对应插件里):
 
-| 操作 | 模型(工具) | 人类(命令/面板) | 定时器(task-wake) |
-|---|---|---|---|
-| create / edit / abandon | ✓ | ✓ | — |
-| claim / progress / block / submit / release | ✓(限当前持有会话) | ✓ | —(被拉起的会话以模型 actor 走工具面) |
-| approve / reject | **✗** | ✓ | — |
-| wake-set / wake-clear | ✓ | ✓ | 仅机械簿记(S5 实现):消费到点——一次性清除、every 推进锚点,且先于起会话提交 |
+| 操作 | 模型(工具) | 人类(命令/面板) | 定时器(task-wake) | 系统(task-reaper) |
+|---|---|---|---|---|
+| create / edit / abandon | ✓ | ✓ | **✗** | **✗** |
+| claim / progress / block / submit | ✓(限当前持有会话) | ✓ | **✗**(被拉起的会话以模型 actor 走工具面) | **✗** |
+| release | ✓(限当前持有会话) | ✓ | **✗** | ✓(仅死持有;存活判断在 task-reaper) |
+| approve / reject | **✗** | ✓ | **✗** | **✗** |
+| wake-set / wake-clear | ✓ | ✓ | 仅机械簿记(S5 实现):消费到点——一次性清除、every 推进锚点,且先于起会话提交 | **✗** |
 
 ## 2. 会话事件(进 `SessionEventMap`,required-on-read)
 

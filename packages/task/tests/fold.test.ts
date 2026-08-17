@@ -66,6 +66,23 @@ describe('transition guards', () => {
     record = apply({ operation: 'claim' }, record)
     record = apply({ operation: 'submit', completionNote: 'x' }, record)
     expect(applyMutation(record, { operation: 'approve' }, { actor: actorModel, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+    // Human-only means human-only: mechanical actors never approve or reject.
+    expect(applyMutation(record, { operation: 'approve' }, { actor: { kind: 'wake' }, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+    expect(applyMutation(record, { operation: 'reject', reason: 'x' }, { actor: { kind: 'system' }, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+  })
+
+  it('pins mechanical actors to their own bookkeeping verbs', () => {
+    let record = created()
+    record = apply({ operation: 'claim' }, record)
+    // The system actor releases dead holds and nothing else.
+    const system = apply({ operation: 'release' }, record, { kind: 'system' })
+    expect(system.status).toBe('todo')
+    record = apply({ operation: 'claim' }, system)
+    expect(applyMutation(record, { operation: 'progress', note: 'x' }, { actor: { kind: 'system' }, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+    // The wake actor consumes occurrences and never works a task.
+    expect(applyMutation(record, { operation: 'progress', note: 'x' }, { actor: { kind: 'wake' }, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+    const woken = applyMutation(record, { operation: 'wake-set', rule: { kind: 'after', afterSeconds: 300 } }, { actor: { kind: 'wake' }, at: '', packByteLimit: packLimit })
+    expect('error' in woken).toBe(false)
   })
 
   it('wake-set validates the rule and wake-clear removes it', () => {

@@ -130,8 +130,18 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     } }
   }
   const humanOnly: readonly TaskOperation[] = ['approve', 'reject']
-  if (humanOnly.includes(mutation.operation) && actor.kind === 'model') {
+  if (humanOnly.includes(mutation.operation) && actor.kind !== 'human') {
     return error('TASK_FORBIDDEN', 'approve and reject are human-only operations')
+  }
+  // Mechanical actors are structurally pinned to their own bookkeeping: the
+  // system actor releases dead holds (liveness is judged by the caller, outside
+  // the ledger), the wake actor consumes occurrences. Neither ever works a task.
+  if (actor.kind === 'system' && mutation.operation !== 'release') {
+    return error('TASK_FORBIDDEN', 'the system actor may only release dead holds')
+  }
+  const wakeOps: readonly TaskOperation[] = ['wake-set', 'wake-clear']
+  if (actor.kind === 'wake' && !wakeOps.includes(mutation.operation)) {
+    return error('TASK_FORBIDDEN', 'the wake actor may only perform wake bookkeeping')
   }
   // 'already claimed' subsumes 'not legal from todo': a held task is never in todo.
   if (mutation.operation === 'claim' && record.holder !== undefined) {
