@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { TaskService } from '../src/index.ts'
+import { TaskService, TaskId } from '../src/index.ts'
 import type { TaskHandle } from '../src/index.ts'
-import type { TaskActor, TaskError, TaskId, TaskView } from '../src/types.ts'
+import type { TaskActor, TaskError, TaskView } from '../src/types.ts'
 
 function setup(): { ctx: Context; service: TaskService } {
   const ctx = new Context()
@@ -128,5 +128,31 @@ describe('TaskService lifecycle', () => {
     await created.dispose()
     expect(created.task.record.id && service.list({ includeArchived: true })[0]!.archived).toBe(true)
     expect(service.list({})).toHaveLength(0)
+  })
+
+  it('links subtasks with cross-record guards and aggregates children', async () => {
+    const { service } = setup()
+    const parent = await newTask(service)
+    const child = await newTask(service)
+    const grandchild = await newTask(service)
+
+    expect(view(await service.mutate(parent, 1, { operation: 'subtask-add', childId: child }, human)).record.subtasks).toEqual([child])
+    await service.mutate(child, 1, { operation: 'subtask-add', childId: grandchild }, human)
+
+    // The parent is reachable from the child: linking backwards is a cycle.
+    expect(await service.mutate(child, 2, { operation: 'subtask-add', childId: parent }, human)).toMatchObject({ code: 'TASK_SUBTASK_CYCLE' })
+    expect(await service.mutate(parent, 2, { operation: 'subtask-add', childId: parent }, human)).toMatchObject({ code: 'TASK_SUBTASK_SELF' })
+    expect(await service.mutate(parent, 2, { operation: 'subtask-add', childId: TaskId('missing') }, human)).toMatchObject({ code: 'TASK_NOT_FOUND' })
+
+    // Parent-side aggregation sees linked children with live status.
+    const session = Session.create(SessionId('s-child'))
+    await service.claim(child, session, { kind: 'model', sessionId: SessionId('s-child') })
+    const children = service.children(parent)
+    expect(children.map(c => c.record.id)).toEqual([child])
+    expect(children[0]!.record.status).toBe('active')
+
+    // Unlinking keeps the parent's own state untouched.
+    expect(view(await service.mutate(parent, 2, { operation: 'subtask-remove', childId: child }, human)).record.subtasks).toEqual([])
+    expect(service.children(parent)).toEqual([])
   })
 })

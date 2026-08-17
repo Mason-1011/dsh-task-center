@@ -6,7 +6,7 @@ Service Definition(`ctx.tasks`)。所有其他 task-center 包的依赖根。
 
 ## 组成
 
-- `src/types.ts`:词汇类型(品牌化 id、状态、11 个动词、双账本事件元数据)与品牌工厂
+- `src/types.ts`:词汇类型(品牌化 id、状态、14 个动词、双账本事件元数据)与品牌工厂
 - `src/fold.ts`:纯状态机——`TRANSITIONS` 转换表、`applyMutation` 守卫(权限矩阵、持有者检查、有界 contextPack)、`foldTasks` 回放折叠(损坏流即抛错)
 - `src/store.ts`:`TaskStore` 端口(append 异步、先落盘后通知)+ 内存默认实现
 - `src/index.ts`:`TaskService`——CAS 变更、域事件先行、会话回执(`task/change` / `task/context-injected`)后写、活事件在提交点后派发

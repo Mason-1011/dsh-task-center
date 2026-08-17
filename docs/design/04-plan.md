@@ -42,4 +42,5 @@
 - [x] 唤醒前预检探测——2026-08-17:task-wake 到点先发 maxTokens:1 探测,QUOTA 阳性即顺延(不消费到点、按平台延时退避),其余一律开火(探测失败不挡活);真实 key 实测通过(fire.e2e.spec.ts 9.6s)
 - [x] 崩溃恢复自动释放死持有(task-reaper)——2026-08-17:会话处置事件 + 挂载清扫两个确定信号,system actor 释放并持久化往返;顺带把权限矩阵收紧到规格(approve/reject 仅人类、wake/system 钉死在簿记动词),修复 zod 持久化枚举缺 release 的真 bug
 - [x] 跨会话续做演示——2026-08-17 真模型实测(continue.e2e.spec.ts,30.7s):会话 A 认领并数到 3 留交接说明后被终止,reaper 释放,会话 B 认领注入上下文包、从 4 续到 10 提交,人类验收;1 到 10 每步恰好一行是"续做而非重做"的硬证明
-- [ ] P1:子任务委派
+- [x] P1:子任务委派·域动词(subtask-add/remove)——2026-08-17:转换表行(todo/active/blocked,不动状态)、per-record 查重在 fold、跨记录守卫(存在/非自身/防环 BFS)在服务提交层、`children()` 聚合读取;tool-task 错误映射补 `invalid_subtask`,zod 持久化枚举同步(吃过的亏),重启往返含挂接事件
+- [ ] P1:子任务委派·工具/命令面(task_delegate 复合动词或 task_create 带父、task_query 显示子任务、面板汇总)

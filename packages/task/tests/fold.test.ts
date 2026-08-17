@@ -29,6 +29,11 @@ function created() {
   return apply(create(), undefined, actorHuman)
 }
 
+/** A model actor for a session that holds nothing. */
+function stranger() {
+  return { kind: 'model', sessionId: 's2' as never } satisfies TaskActor
+}
+
 describe('transition guards', () => {
   it('create rejects empty objective and acceptance', () => {
     expect(applyMutation(undefined, { operation: 'create', taskId: TaskId('t'), objective: '  ', acceptance: 'x' }, { actor: actorHuman, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_INVALID_OBJECTIVE', message: expect.any(String) } })
@@ -125,6 +130,29 @@ describe('transition guards', () => {
     // Human may release any held task.
     const humanReleased = apply({ operation: 'release' }, apply({ operation: 'claim' }, record), actorHuman)
     expect(humanReleased.holder).toBeUndefined()
+  })
+
+  it('subtask-add and subtask-remove maintain the child list with per-record guards', () => {
+    const child = TaskId('c1')
+    let record = created()
+    record = apply({ operation: 'subtask-add', childId: child }, record, actorHuman)
+    expect(record.subtasks).toEqual([child])
+    // Duplicate link and unlink of a stranger both refuse, keeping the list exact.
+    expect(applyMutation(record, { operation: 'subtask-add', childId: child }, { actor: actorHuman, at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_SUBTASK_DUPLICATE', message: expect.any(String) } })
+    expect(applyMutation(record, { operation: 'subtask-remove', childId: TaskId('c2') }, { actor: actorHuman, at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_SUBTASK_NOT_CHILD', message: expect.any(String) } })
+    // Decomposition closes during review, like edit.
+    let reviewable = apply({ operation: 'claim' }, record)
+    reviewable = apply({ operation: 'submit', completionNote: 'x' }, reviewable)
+    expect(applyMutation(reviewable, { operation: 'subtask-add', childId: TaskId('c3') }, { actor: actorHuman, at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_INVALID_TRANSITION', message: expect.any(String) } })
+    // A stranger model session may not decompose someone else's held task.
+    const held = apply({ operation: 'claim' }, record)
+    expect(applyMutation(held, { operation: 'subtask-add', childId: TaskId('c3') }, { actor: stranger(), at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_NOT_CLAIMED', message: expect.any(String) } })
+    const removed = apply({ operation: 'subtask-remove', childId: child }, held, actorHuman)
+    expect(removed.subtasks).toEqual([])
   })
 
   it('blocked resolves on the next progress', () => {

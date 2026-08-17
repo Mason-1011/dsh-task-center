@@ -29,6 +29,7 @@ const actor = z.discriminatedUnion('kind', [
 /** The closed operation set; the fold enforces each verb's transition rules. */
 const operation = z.enum([
   'create', 'claim', 'progress', 'block', 'submit', 'approve', 'reject', 'release',
+  'subtask-add', 'subtask-remove',
   'abandon', 'edit', 'wake-set', 'wake-clear',
 ] satisfies [TaskOperation, ...TaskOperation[]])
 

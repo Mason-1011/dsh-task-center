@@ -35,6 +35,8 @@ export const TRANSITIONS: Readonly<Record<TaskOperation, TransitionRule>> = {
   approve: { from: ['review'], to: 'done' },
   reject: { from: ['review'], to: 'active' },
   release: { from: ['active', 'blocked'], to: 'todo' },
+  'subtask-add': { from: ['todo', 'active', 'blocked'], to: 'same' },
+  'subtask-remove': { from: ['todo', 'active', 'blocked'], to: 'same' },
   abandon: { from: ['todo', 'active', 'blocked', 'review'], to: 'archive' },
   edit: { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
   'wake-set': { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
@@ -155,8 +157,9 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     return error('TASK_INVALID_TRANSITION', 'edit requires leaving review first (approve or reject)')
   }
   if (record.holder !== undefined && actor.kind === 'model' && actor.sessionId !== record.holder
-      && (mutation.operation === 'progress' || mutation.operation === 'block' || mutation.operation === 'submit' || mutation.operation === 'release')) {
-    return error('TASK_NOT_CLAIMED', 'only the holding session may progress, block, submit, or release')
+      && (mutation.operation === 'progress' || mutation.operation === 'block' || mutation.operation === 'submit' || mutation.operation === 'release'
+        || mutation.operation === 'subtask-add' || mutation.operation === 'subtask-remove')) {
+    return error('TASK_NOT_CLAIMED', 'only the holding session may progress, block, submit, release, or decompose')
   }
   const next: Draft<TaskRecord> = { ...record, revision: record.revision + 1, updatedAt: context.at }
   switch (mutation.operation) {
@@ -227,6 +230,20 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       next.status = 'todo'
       delete next.holder
       delete next.blockedReason
+      break
+    }
+    case 'subtask-add': {
+      if (record.subtasks.includes(mutation.childId)) {
+        return error('TASK_SUBTASK_DUPLICATE', 'child is already linked to this task')
+      }
+      next.subtasks = [...record.subtasks, mutation.childId]
+      break
+    }
+    case 'subtask-remove': {
+      if (!record.subtasks.includes(mutation.childId)) {
+        return error('TASK_SUBTASK_NOT_CHILD', 'child is not linked to this task')
+      }
+      next.subtasks = record.subtasks.filter(id => id !== mutation.childId)
       break
     }
     case 'abandon': {

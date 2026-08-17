@@ -19,6 +19,7 @@ import type {
   TaskError,
   TaskMutation,
   TaskOperation,
+  TaskRecord,
   TaskSnapshotChangeMeta,
   TaskStatus,
   TaskView,
@@ -205,10 +206,57 @@ export class TaskService extends Service {
     return due
   }
 
+  /**
+   * Views of one task's linked children, for parent-side progress aggregation.
+   * @param taskId - the parent task id.
+   * @returns child views in link order; archived children included.
+   */
+  children(taskId: TaskId): TaskView[] {
+    const parent = this.get(taskId)
+    if (parent === undefined) return []
+    return parent.record.subtasks
+      .map(id => this.get(id))
+      .filter((view): view is TaskView => view !== undefined)
+  }
+
+  /**
+   * Cross-record guard for `subtask-add`: the child must exist, differ from the
+   * parent, and not reach the parent through its own subtree (the per-record
+   * fold cannot see other tasks). The duplicate check stays in the fold.
+   * @param records - every folded task record.
+   * @param parentId - the task gaining a child.
+   * @param childId - the candidate child.
+   * @returns the rejection, or undefined when the link is legal.
+   */
+  private checkLink(records: ReadonlyMap<TaskId, TaskRecord>, parentId: TaskId, childId: TaskId): TaskError | undefined {
+    if (childId === parentId) return { code: 'TASK_SUBTASK_SELF', message: 'a task cannot be its own child' }
+    const child = records.get(childId)
+    if (child === undefined) return { code: 'TASK_NOT_FOUND', message: 'child task does not exist' }
+    // Linking is legal unless the parent is already reachable from the child.
+    const seen = new Set<TaskId>([childId])
+    const queue: TaskId[] = [childId]
+    while (queue.length > 0) {
+      const current = records.get(queue.shift()!)
+      if (current === undefined) continue
+      for (const id of current.subtasks) {
+        if (id === parentId) return { code: 'TASK_SUBTASK_CYCLE', message: 'linking would create a subtask cycle' }
+        if (!seen.has(id)) {
+          seen.add(id)
+          queue.push(id)
+        }
+      }
+    }
+    return undefined
+  }
+
   /** Validate, append to the domain ledger, emit, and write the session receipt. */
   private async commit(taskId: TaskId, mutation: TaskMutation, actor: TaskActor, session?: Session): Promise<TaskView | TaskError> {
     const at = new Date().toISOString()
     const { records, archived } = foldTasks(this.store.events(), this.config.contextPackByteLimit)
+    if (mutation.operation === 'subtask-add') {
+      const rejected = this.checkLink(records, taskId, mutation.childId)
+      if (rejected !== undefined) return rejected
+    }
     const result = applyMutation(records.get(taskId), mutation, {
       actor, at, packByteLimit: this.config.contextPackByteLimit,
     })

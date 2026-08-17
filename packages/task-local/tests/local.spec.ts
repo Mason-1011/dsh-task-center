@@ -85,6 +85,12 @@ describe('task-local durability', () => {
     if ('code' in secondClaimed) throw new Error(secondClaimed.code)
     const released = await second.ctx.tasks.mutate(secondTask.task.record.id, secondClaimed.record.revision, { operation: 'release' }, { kind: 'system' })
     if ('code' in released) throw new Error(released.code)
+
+    // A subtask link also round-trips the durable zod envelope.
+    const thirdTask = await second.ctx.tasks.create({ objective: 'child', acceptance: 'link survives' }, human)
+    if ('code' in thirdTask) throw new Error(thirdTask.code)
+    const linked = await second.ctx.tasks.mutate(secondTask.task.record.id, released.record.revision, { operation: 'subtask-add', childId: thirdTask.task.record.id }, human)
+    if ('code' in linked) throw new Error(linked.code)
     await shutdown(second.fibers)
 
     const third = await boot(root)
@@ -92,7 +98,9 @@ describe('task-local durability', () => {
     if (restoredRelease === undefined) throw new Error('the system release did not survive the restart')
     expect(restoredRelease.record.status).toBe('todo')
     expect(restoredRelease.record.holder).toBeUndefined()
-    expect(restoredRelease.record.revision).toBe(released.record.revision)
+    expect(restoredRelease.record.revision).toBe(linked.record.revision)
+    expect(restoredRelease.record.subtasks).toEqual([thirdTask.task.record.id])
+    expect(third.ctx.tasks.children(secondTask.task.record.id).map(c => c.record.id)).toEqual([thirdTask.task.record.id])
     await shutdown(third.fibers)
   })
 

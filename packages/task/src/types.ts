@@ -48,6 +48,8 @@ export type TaskOperation =
   | 'approve'
   | 'reject'
   | 'release'
+  | 'subtask-add'
+  | 'subtask-remove'
   | 'abandon'
   | 'wake-set'
   | 'wake-clear'
@@ -75,6 +77,8 @@ export type TaskMutation =
   | { readonly operation: 'approve' }
   | { readonly operation: 'reject'; readonly reason: string }
   | { readonly operation: 'release' }
+  | { readonly operation: 'subtask-add'; readonly childId: TaskId }
+  | { readonly operation: 'subtask-remove'; readonly childId: TaskId }
   | { readonly operation: 'abandon' }
   | { readonly operation: 'wake-set'; readonly rule: WakeRule }
   | { readonly operation: 'wake-clear' }
@@ -156,6 +160,10 @@ export type TaskErrorCode =
   | 'TASK_INVALID_NOTE'
   | 'TASK_INVALID_REASON'
   | 'TASK_INVALID_TRANSITION'
+  | 'TASK_SUBTASK_SELF'
+  | 'TASK_SUBTASK_CYCLE'
+  | 'TASK_SUBTASK_DUPLICATE'
+  | 'TASK_SUBTASK_NOT_CHILD'
   | 'TASK_WAKE_INVALID_RULE'
   | 'TASK_INVALID_FILTER'
 
