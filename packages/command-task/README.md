@@ -14,8 +14,8 @@
 |---|---|---|
 | `/task` | 全景面板:阻塞置顶,待验收、在办、待办分组计数 | — |
 | `/task list <status>` | 按状态过滤 | 未知状态 |
-| `/task show <id前缀>` | 单任务详情,含上下文包尾部 8 行 | 无匹配 / 前缀歧义(列出候选) |
-| `/task create <objective> :: <acceptance>` | 人类建任务,交给会话认领 | 缺 `::` / 空段 |
+| `/task show <id前缀>` | 单任务详情,含存活子任务与上下文包尾部 8 行 | 无匹配 / 前缀歧义(列出候选) |
+| `/task create <objective> :: <acceptance> [under <id前缀>]` | 人类建任务,交给会话认领;under 指定父任务即分解 | 缺 `::` / 空段 / 父前缀无匹配或歧义(不建) |
 | `/task wake <id前缀> after <秒> \| at <ISO> \| every <秒>` | 定时唤醒:到点由 task-wake 起新会话做该任务 | TASK_WAKE_INVALID_RULE(every 间隔 ≥ 300 秒等) |
 | `/task nowake <id前缀>` | 取消定时唤醒 | 无规则 / 非待验收状态 |
 | `/task approve <id前缀>` | 验收(review → done),释放持有会话 | 非待验收 / 已归档 |
@@ -26,5 +26,6 @@
 ## Known Limitations and Deferred Work
 
 - 面板行内 `blockedOverdue` 恒为 false:阻塞超时推导随 task-wake 落地。
+- 面板行以 `⊕N` 计子任务挂接;`show` 才展开子任务列表。子任务解除(subtask-remove)未暴露命令。
 - 无分页:面板一次列出接缝 `listDefaultLimit` 条;`show`/`approve`/`reject` 走全量前缀匹配不受限。
 - edit / abandon / wake-set 未暴露:留给后续命令扩展(P1)。

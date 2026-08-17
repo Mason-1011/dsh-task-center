@@ -113,11 +113,13 @@ type TaskDomainEvent = {
 
 | 工具 | 输入 | 成功值 | 错误并集 |
 |---|---|---|---|
-| `task_create` | objective, acceptance, workspaceIds? | TaskView | invalid_objective / invalid_acceptance |
+| `task_create` | objective, acceptance, workspaceIds?, parentTaskId? | TaskView(含 subtasks id 列表) | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask / stale_revision |
 | `task_claim` | taskId | TaskView + contextPack(同时产生 `task/context-injected` 会话事件) | not_found / already_claimed |
 | `task_update` | taskId, revision, note, next? | TaskView | not_claimed / stale_revision / invalid_note |
 | `task_report` | taskId, revision, outcome: `'blocked' \| 'review'`, reason?, completionNote? | TaskView | invalid_transition / invalid_reason / invalid_note |
-| `task_query` | filter(status?, workspaceId?, limit?) | TaskView[] | invalid_filter |
+| `task_query` | filter(status?, workspaceId?, parentTaskId?, limit?) | TaskView[] | invalid_filter / not_found |
+
+`parentTaskId` 语义:先建子任务、再以调用会话挂接到父;挂接被拒(非父持有者、父不存在、成环)即**回收刚建的任务**(abandon,同一 model actor)并返回拒绝码——工具保持单一效果。`task_query` 带 parentTaskId 时改走 `children()` 聚合读取(滤归档),模型据此看委派子任务的实时状态。
 
 错误形状一律 `{ code, message }`(仿 schedule 的 ScheduleToolError 闭集)。提示词段:一段"任务纪律"(claim 前先读 pack;submit 必须对照 acceptance;blocked 要说清缺什么),order 仿 tool-goal。
 

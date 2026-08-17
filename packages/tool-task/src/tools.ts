@@ -57,7 +57,9 @@ const badLimit = (): TaskToolError => ({ code: 'invalid_filter', message: 'limit
 const CREATE_DESCRIPTION =
   'Create one durable task. Tasks outlive this chat: they are tracked across sessions until a human '
   + 'approves or rejects the submitted work. objective states the outcome; acceptance lists the concrete '
-  + 'criteria a submitted result will be checked against — write them as verifiable statements.'
+  + 'criteria a submitted result will be checked against — write them as verifiable statements. '
+  + 'parent_task_id links the new task as a subtask of a task you hold (decomposition); if the link is '
+  + 'refused the creation is withdrawn and the refusal is returned.'
 
 const CLAIM_DESCRIPTION =
   'Claim one todo task for this session and receive its full context pack. Read the pack before working: '
@@ -75,7 +77,8 @@ const REPORT_DESCRIPTION =
   + 'work with a completion note that checks each acceptance criterion. Humans then approve or reject.'
 
 const QUERY_DESCRIPTION =
-  'Query tasks by filter. Omit every filter to list current non-archived tasks. Use the exact id and '
+  'Query tasks by filter. Omit every filter to list current non-archived tasks. parent_task_id instead '
+  + 'lists that task\'s live children — use it to watch delegated subtasks. Use the exact id and '
   + 'revision from the results for claim, update, and report calls.'
 
 /**
@@ -101,6 +104,10 @@ export function registerTaskTools(ctx: Context): () => void {
           items: { type: 'string' },
           description: 'Optional workspaces this task spans.',
         },
+        parent_task_id: {
+          type: 'string',
+          description: 'Optional exact id of the parent task to link this task under.',
+        },
       },
       output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
       async execute(args, exec) {
@@ -111,7 +118,24 @@ export function registerTaskTools(ctx: Context): () => void {
           acceptance: args.acceptance,
           ...args.workspace_ids === undefined ? {} : { workspaceIds: args.workspace_ids },
         }, actor(who.session))
-        return 'code' in created ? toolError(created) : taskToolTask(created.task)
+        if ('code' in created) return toolError(created)
+        if (args.parent_task_id === undefined) return taskToolTask(created.task)
+        const parentId = taskIdOf(args.parent_task_id)
+        const parent = ctx.tasks.get(parentId)
+        if (parent === undefined) {
+          await ctx.tasks.mutate(created.task.record.id, 1, { operation: 'abandon' }, actor(who.session), who.session)
+          return toolError({ code: 'TASK_NOT_FOUND', message: 'parent task does not exist' })
+        }
+        // Link under the parent as this session; a refused link withdraws the child
+        // so the tool stays single-effect (the abandon is the same model actor).
+        const linked = await ctx.tasks.mutate(parentId, parent.record.revision, {
+          operation: 'subtask-add', childId: created.task.record.id,
+        }, actor(who.session), who.session)
+        if ('code' in linked) {
+          await ctx.tasks.mutate(created.task.record.id, 1, { operation: 'abandon' }, actor(who.session), who.session)
+          return toolError(linked)
+        }
+        return taskToolTask(created.task)
       },
       presentCall: args => present('Create task', 'other', args.objective),
     })))
@@ -216,6 +240,7 @@ export function registerTaskTools(ctx: Context): () => void {
           description: 'Optional exact status filter.',
         },
         workspace_id: { type: 'string', description: 'Optional workspace filter.' },
+        parent_task_id: { type: 'string', description: 'Optional exact id; list this task\'s live children.' },
         limit: { type: 'number', description: 'Optional positive safe-integer result cap.' },
       },
       output: { schema: LIST_OUTPUT_SCHEMA, render: renderValue },
@@ -224,6 +249,14 @@ export function registerTaskTools(ctx: Context): () => void {
         if ('code' in who) return who
         if (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit <= 0)) {
           return badLimit()
+        }
+        if (args.parent_task_id !== undefined) {
+          const parent = ctx.tasks.get(taskIdOf(args.parent_task_id))
+          if (parent === undefined) return toolError({ code: 'TASK_NOT_FOUND', message: 'parent task does not exist' })
+          return ctx.tasks.children(parent.record.id)
+            .filter(child => !child.archived)
+            .slice(0, args.limit ?? undefined)
+            .map(taskToolTask)
         }
         return ctx.tasks.list({
           ...args.status === undefined ? {} : { status: args.status as TaskStatus },

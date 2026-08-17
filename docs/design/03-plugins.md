@@ -6,7 +6,7 @@
 |---|---|---|
 | `task/task` | 定义件(Service) | `ctx.tasks`:状态机转换、contextPack 读写、`task/*` 事件 |
 | `task/task-local` | Provider | 经 `ctx.storageDomain.open(taskDomainSpec)` 开域;后端由配置路由(json/sqlite) |
-| `task/tool-task` | Consumer(模型) | `task_claim / task_update / task_report / task_query` 四工具 + 提示词段 |
+| `task/tool-task` | Consumer(模型) | `task_create(可带父) / task_claim / task_update / task_report / task_query(可按父查子)` 五工具 + 提示词段 |
 | `task/command-task` + `client/ui-task` | Consumer(人类) | `/task` 命令 + Web 面板(全景/过滤/阻塞置顶/待验收队列/跳转会话) |
 | `task/task-wake` | Provider(时间) | 宿主级定时器,见 §2 |
 

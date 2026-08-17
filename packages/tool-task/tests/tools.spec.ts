@@ -124,6 +124,47 @@ describe('tool-task', () => {
     expect((await fail(ctx, 'task_update', { task_id: created.id, revision: claimed.revision, note: 'hi' }, execOf(strangerSession))).code).toBe('not_claimed')
   })
 
+  it('delegates: create under a held parent, list children, withdraw on refused links', async () => {
+    const { ctx } = await boot()
+    const parent = await ok(ctx, 'task_create', { objective: 'parent outcome', acceptance: 'children done' })
+    await ok(ctx, 'task_claim', { task_id: parent.id })
+    const parentRevision = ctx.tasks.get(parent.id as never)!.record.revision
+
+    const child = await ok(ctx, 'task_create', {
+      objective: 'child outcome', acceptance: 'own criteria', parent_task_id: parent.id,
+    })
+    expect(child.status).toBe('todo')
+    expect(ctx.tasks.get(parent.id as never)!.record.subtasks).toEqual([child.id as never])
+
+    // The children listing projects the link from the parent side.
+    const children = await tool(ctx, 'task_query').execute({ parent_task_id: parent.id }, execOf()) as TaskToolListValue
+    if ('code' in children) throw new Error(children.code)
+    expect(children).toHaveLength(1)
+    expect(children[0]!.id).toBe(child.id)
+    expect(children[0]!.subtasks).toEqual([])
+
+    // A stranger session holds nothing: its link under the parent is refused
+    // and the just-created child is withdrawn, not orphaned.
+    const refused = await fail(ctx, 'task_create', {
+      objective: 'stray', acceptance: 'x', parent_task_id: parent.id,
+    }, execOf(strangerSession))
+    // The parent is held by `session`, so a stranger may not decompose it.
+    expect(refused.code).toBe('not_claimed')
+    const afterRefusal = ctx.tasks.list({ includeArchived: true, limit: 100 })
+    expect(afterRefusal.filter(view => view.record.objective === 'stray' && !view.archived)).toHaveLength(0)
+
+    // A missing parent is not_found, and nothing is left behind either.
+    expect((await fail(ctx, 'task_create', { objective: 'o2', acceptance: 'a2', parent_task_id: 'nope' })).code).toBe('not_found')
+    expect(ctx.tasks.list({}).some(view => view.record.objective === 'o2')).toBe(false)
+
+    // The parent's revision stayed at the claim while linking succeeded once.
+    expect(ctx.tasks.get(parent.id as never)!.record.revision).toBe(parentRevision + 1)
+    // A second session claims the child and works it independently of the parent.
+    const childClaimed = await ok(ctx, 'task_claim', { task_id: child.id }, execOf(strangerSession))
+    expect(childClaimed.holder).toBe(strangerId as never)
+    await ok(ctx, 'task_update', { task_id: child.id, revision: childClaimed.revision, note: 'delegate worked' }, execOf(strangerSession))
+  })
+
   it('disposes its registrations with the plugin fiber', async () => {
     const { ctx, toolFiber } = await boot()
     const names = () => ctx.tools.schemas().map(schema => schema.name)

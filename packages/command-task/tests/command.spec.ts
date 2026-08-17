@@ -127,6 +127,30 @@ describe('command-task', () => {
     expect((noReason.result as { text: string }).text).toContain('理由')
   })
 
+  it('decomposes via create under, shows children, and withdraws on refused links', async () => {
+    const { ctx, agent } = await boot()
+    await dispatch(ctx, agent, '/task create 发布报告 :: 全部章节就绪')
+    const parent = ctx.tasks.list({})[0]!
+
+    const spawned = await dispatch(ctx, agent, `/task create 写第一节 :: 有数据支撑 under ${parent.record.id.slice(0, 8)}`)
+    expect(textOf(spawned)).toContain('挂接为')
+    const children = ctx.tasks.children(parent.record.id)
+    expect(children).toHaveLength(1)
+    expect(children[0]!.record.objective).toBe('写第一节')
+
+    const detail = await dispatch(ctx, agent, `/task show ${parent.record.id.slice(0, 8)}`)
+    expect(textOf(detail)).toContain('子任务 (1)')
+    expect(textOf(detail)).toContain(children[0]!.record.id.slice(0, 8))
+    // The panel line counts the link.
+    const panel = await dispatch(ctx, agent, '/task')
+    expect(textOf(panel)).toContain('⊕1')
+
+    // An unresolvable parent prefix refuses and leaves no orphan task behind.
+    const refused = await dispatch(ctx, agent, '/task create 无家可归 :: x :: under zzzz')
+    expect(refused.result.kind).toBe('error')
+    expect(ctx.tasks.list({ includeArchived: true, limit: 100 }).filter(view => view.record.objective === '无家可归' && !view.archived)).toHaveLength(0)
+  })
+
   it('panels blocked work first and filters by status', async () => {
     const { ctx, agent } = await boot()
     expect(textOf(await dispatch(ctx, agent, '/task'))).toBe('任务队列为空')

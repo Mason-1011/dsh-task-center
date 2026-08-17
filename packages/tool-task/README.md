@@ -8,11 +8,11 @@
 
 | 工具 | 作用 | 主要错误码 |
 |---|---|---|
-| `task_create` | 建任务(objective / acceptance / workspace_ids?) | invalid_objective / invalid_acceptance |
+| `task_create` | 建任务(objective / acceptance / workspace_ids?);parent_task_id 挂为父任务子任务,挂接被拒即回收新建任务 | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask |
 | `task_claim` | 认领并取回完整 contextPack | not_found / already_claimed |
 | `task_update` | 记一条进展(note / next),自动解除阻塞 | not_claimed / stale_revision / invalid_note |
 | `task_report` | 上报结果:blocked(附理由)或 review(附对照 acceptance 的自检) | invalid_reason / invalid_note / invalid_transition |
-| `task_query` | 按 status / workspace_id / limit 过滤 | invalid_filter |
+| `task_query` | 按 status / workspace_id / limit 过滤;parent_task_id 改列该任务的存活子任务 | invalid_filter / not_found |
 
 **权限**:approve/reject 仅人类——工具面不注册这两个动词,且接缝在执行器里拒绝模型 actor。
 
@@ -25,5 +25,5 @@
 ## Known Limitations and Deferred Work
 
 - `task` 投影不含 wakeRule:唤醒规则对模型不可见,待 task-wake 落地后随工具面补齐。
-- `task_update` 只覆盖 progress;edit / wake-set / wake-clear 留给人类命令面(P1)。
+- `task_update` 只覆盖 progress;edit / wake-set / wake-clear / subtask-remove 留给人类命令面。
 - 快照测试(无 key 的真实可运行示例转写)随 headless 闭环示例补上。

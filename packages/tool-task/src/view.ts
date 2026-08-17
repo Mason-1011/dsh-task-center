@@ -18,6 +18,7 @@ export interface TaskToolTask {
   readonly workspaceIds: string[]
   readonly holder: string | null
   readonly blockedReason?: { code: string; message: string }
+  readonly subtasks: string[]
   readonly contextPack: string
 }
 
@@ -93,6 +94,7 @@ export function taskToolTask(view: TaskView): TaskToolTask {
     ...record.blockedReason === undefined ? {} : {
       blockedReason: { code: record.blockedReason.code, message: record.blockedReason.message },
     },
+    subtasks: [...record.subtasks],
     contextPack: record.contextPack,
   }
 }
@@ -117,6 +119,7 @@ export const TASK_SCHEMA = {
         message: { type: 'string', required: true },
       },
     },
+    subtasks: { type: 'array', required: true, items: { type: 'string' } },
     contextPack: { type: 'string', required: true },
   },
 } as const

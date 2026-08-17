@@ -22,8 +22,8 @@ const USAGE = [
   '  /task                        — 全景面板:阻塞置顶、待验收、在办、待办',
   '  /task list <status>          — 按状态过滤(todo|active|blocked|review|done)',
   '  /task show <id前缀>          — 单任务详情,含上下文包尾部',
-  '  /task create <objective> :: <acceptance>',
-  '                               — 人类建任务,交给会话认领',
+  '  /task create <objective> :: <acceptance> [under <id前缀>]',
+  '                               — 人类建任务,交给会话认领;under 指定父任务即分解',
   '  /task wake <id前缀> after <秒> | at <ISO时刻> | every <秒>',
   '                               — 定时唤醒:到点起新会话做该任务',
   '  /task nowake <id前缀>        — 取消定时唤醒',
@@ -50,7 +50,8 @@ function lineOf(view: TaskView): string {
   const holder = view.record.holder === undefined ? '' : ` @${view.record.holder}`
   const pack = view.record.contextPack === '' ? '' : ` · pack ${encoder.encode(view.record.contextPack).length}B`
   const wake = view.record.wakeRule === undefined ? '' : ' · ⏰'
-  return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${pack}${wake}`
+  const spawn = view.record.subtasks.length === 0 ? '' : ` · ⊕${view.record.subtasks.length}`
+  return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${pack}${wake}${spawn}`
 }
 
 /** Every live or archived task, so prefix matching never misses over the cap. */
@@ -99,10 +100,11 @@ function describeWake(rule: WakeRule): string {
   return `每 ${rule.everySeconds} 秒(锚点 ${rule.anchorAt})`
 }
 
-/** Detail view of one task, ending with the context-pack tail. */
-function show(view: TaskView): CommandResult {
+/** Detail view of one task, its live children, and the context-pack tail. */
+function show(ctx: Context, view: TaskView): CommandResult {
   const record = view.record
   const pack = record.contextPack === '' ? '(尚无记录)' : record.contextPack.split('\n').slice(-8).join('\n')
+  const children = ctx.tasks.children(record.id).filter(child => !child.archived)
   return {
     kind: 'success',
     text: [
@@ -112,6 +114,7 @@ function show(view: TaskView): CommandResult {
       record.holder === undefined ? '持有会话: 无' : `持有会话: ${record.holder}`,
       ...record.blockedReason === undefined ? [] : [`阻塞: ${record.blockedReason.code} — ${record.blockedReason.message}`],
       ...record.wakeRule === undefined ? [] : [`定时唤醒: ${describeWake(record.wakeRule)}`],
+      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(lineOf).join('\n')}`],
       `上下文包(尾部 8 行):\n${pack}`,
     ].join('\n'),
   }
@@ -134,19 +137,41 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
   if (sub === 'show') {
     if (tail === '') return { kind: 'error', text: USAGE }
     const found = resolve(allTasks(ctx), tail)
-    return 'error' in found ? { kind: 'error', text: found.error } : show(found.view)
+    return 'error' in found ? { kind: 'error', text: found.error } : show(ctx, found.view)
   }
 
   if (sub === 'create') {
-    const separator = tail.indexOf('::')
+    // An optional trailing `under <prefix>` links the new task under a parent.
+    const spawn = /^(.*)\s+under\s+(\S+)$/.exec(tail)
+    const body = spawn === null ? tail : spawn[1]!
+    const parentPrefix = spawn?.[2]
+    const separator = body.indexOf('::')
     if (separator === -1) return { kind: 'error', text: 'create 需要 <objective> :: <acceptance> 两段,以 :: 分隔' }
-    const objective = tail.slice(0, separator).trim()
-    const acceptance = tail.slice(separator + 2).trim()
+    const objective = body.slice(0, separator).trim()
+    const acceptance = body.slice(separator + 2).trim()
     if (objective === '' || acceptance === '') return { kind: 'error', text: 'objective 与 acceptance 都不能为空' }
     const created = await ctx.tasks.create({ objective, acceptance }, { kind: 'human' })
-    return 'code' in created
-      ? failure(created)
-      : { kind: 'success', text: `已创建 [${created.task.record.id.slice(0, 8)}] ${objective}` }
+    if ('code' in created) return failure(created)
+    const childId = created.task.record.id
+    if (parentPrefix === undefined) {
+      return { kind: 'success', text: `已创建 [${childId.slice(0, 8)}] ${objective}` }
+    }
+    const found = resolve(allTasks(ctx), parentPrefix)
+    if ('error' in found) {
+      await ctx.tasks.mutate(childId, 1, { operation: 'abandon' }, { kind: 'human' })
+      return { kind: 'error', text: found.error }
+    }
+    const linked = await ctx.tasks.mutate(found.view.record.id, found.view.record.revision, {
+      operation: 'subtask-add', childId,
+    }, { kind: 'human' })
+    if ('code' in linked) {
+      await ctx.tasks.mutate(childId, 1, { operation: 'abandon' }, { kind: 'human' })
+      return failure(linked)
+    }
+    return {
+      kind: 'success',
+      text: `已创建 [${childId.slice(0, 8)}] ${objective}\n挂接为 [${found.view.record.id.slice(0, 8)}] 的子任务`,
+    }
   }
 
   if (sub === 'approve' || sub === 'reject') {
