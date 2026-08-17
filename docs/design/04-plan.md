@@ -44,3 +44,4 @@
 - [x] 跨会话续做演示——2026-08-17 真模型实测(continue.e2e.spec.ts,30.7s):会话 A 认领并数到 3 留交接说明后被终止,reaper 释放,会话 B 认领注入上下文包、从 4 续到 10 提交,人类验收;1 到 10 每步恰好一行是"续做而非重做"的硬证明
 - [x] P1:子任务委派·域动词(subtask-add/remove)——2026-08-17:转换表行(todo/active/blocked,不动状态)、per-record 查重在 fold、跨记录守卫(存在/非自身/防环 BFS)在服务提交层、`children()` 聚合读取;tool-task 错误映射补 `invalid_subtask`,zod 持久化枚举同步(吃过的亏),重启往返含挂接事件
 - [x] P1:子任务委派·工具/命令面——2026-08-17:`task_create` 带可选 `parent_task_id`(挂接被拒即回收新建任务,单一效果),任务投影带 `subtasks`,`task_query` 带 `parent_task_id` 走 `children()` 聚合;命令面 `create … under <父>`、`show` 展开子任务、面板行 `⊕N` 计数
+- [x] P1:子任务委派·真模型闭环(delegate.e2e.spec.ts,26.1s)——2026-08-17:会话 A 认领父任务并以 parent_task_id 分解出数数子任务,会话 B(父任务的陌生人)以 parent_task_id 查子、认领子任务数到 3 提交,人类验收;父任务全程由 A 持有,`children()` 聚合读到子任务 done——两个会话同时持有两个任务,委派而非转手
