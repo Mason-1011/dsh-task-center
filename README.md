@@ -3,7 +3,7 @@
 > 个人任务指挥中心:dsh(DeepSeek Harness)的任务全生命周期插件族。
 > **人管一摊长期任务,agent 跨会话认领并推进,定时自己醒来干活,进度对人类永远可见。**
 
-独立于 [deepseek-harness](https://github.com/deepseek-harness/deepseek-harness) 实现的 out-of-tree 插件仓库,依赖其公开发布的 npm 包(`@deepseek-ai/cordis`、`@deepseek-ai/dsh-*`)。设计档案见 [docs/design/](docs/design/)。
+独立于 [deepseek-harness](https://github.com/deepseek-harness/deepseek-harness) 实现的 out-of-tree 插件仓库,依赖其公开发布的 npm 包(`@deepseek-ai/cordis`、`@deepseek-ai/dsh-*`)。已装 dsh 的机器上加载本插件族,见[「装进已安装的 dsh」](#装进已安装的-dsh)。设计档案见 [docs/design/](docs/design/)。
 
 ## 切片计划
 
@@ -21,6 +21,94 @@ docs/design/   设计档案(从 harness 仓库迁移的底稿)
 packages/      @task-center/* 插件包(pnpm workspace)
 ```
 
+## 装进已安装的 dsh
+
+前置:已全局安装 [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh)(`npm i -g @deepseek-ai/dsh`),且 `dsh plugin` 能找到 `pnpm`(corepack 用户:`corepack enable`;若 node 目录无写权限,`corepack enable --install-directory <目录>` 后把该目录挂上 PATH)。
+
+**1. 构建**:Node 不做 `node_modules` 下的 `.ts` 类型擦除,插件必须以 JS 产物装入 profile——
+
+```sh
+corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
+```
+
+**2. 装包**:从仓库根装入 7 个插件包(`shell` 除外:它是自带 REPL 的独立启动器,与 dsh 的运行模式冲突)——
+
+```sh
+dsh plugin --profile headless add \
+  file:./packages/task file:./packages/task-local file:./packages/tool-task \
+  file:./packages/command-task file:./packages/task-wake \
+  file:./packages/task-quota file:./packages/task-reaper
+```
+
+profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板,其他名字从 `dsh-base` 起)。
+
+**3. 注册插件行**:写进 `~/.dsh/profiles/<name>/cordis.patch.yml`(不是 `cordis.yml`,那是空根)。headless 需附带 storage 三行;web bundle 自带 storage,**不要重插**(duplicate id 会大声失败),从下模板删掉前三行即可。
+
+<details>
+<summary>cordis.patch.yml 模板(headless)</summary>
+
+```yaml
+- insert:
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')   # 与 web bundle 同根:两个 profile 共用一份任务账本
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+        routes: {}
+    - id: tasks
+      name: '@task-center/task'
+      config:
+        contextPackByteLimit: 2000
+        listDefaultLimit: 20
+    - id: task-local
+      name: '@task-center/task-local'
+      config: {}
+    - id: tool-task
+      name: '@task-center/tool-task'
+      config: {}
+    - id: command-task
+      name: '@task-center/command-task'
+      config:
+        staleDays: 3
+    - id: task-wake
+      name: '@task-center/task-wake'
+      config:
+        pollSeconds: 30
+        agent:
+          provider: deepseek-official
+          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
+        patrol:
+          at: '09:30'
+    - id: task-quota
+      name: '@task-center/task-quota'
+      config: {}
+    - id: task-reaper
+      name: '@task-center/task-reaper'
+      config: {}
+```
+
+</details>
+
+**4. 使用**:
+
+```sh
+export DEEPSEEK_API_KEY=...                    # 或在 web 的 Models 页保存
+dsh --profile headless "某任务"                 # 一次性:建 agent、干活、打印结果、退出
+dsh web                                        # 浏览器 UI:任务工具进模型,/task 命令面进人类
+dsh --profile <name> --dump-config             # 不启动,只检查组合树
+```
+
+**迭代与坑**:
+
+- 改了插件源码:`corepack pnpm run build` 后,对 profile 先 `remove` 再 `add` 同一批包——pnpm 缓存 `file:` 拷贝,`--force` 刷不掉。
+- patch 插入的行必须带显式 `config`(空也给 `{}`):patch 路径不把缺失 config 归一化,apply 直读 config 的插件(如 task-quota)会当场崩。
+- 账本位置:dsh profile 共用 `~/.dsh/storages`;独立 REPL 壳(下节 `corepack pnpm start`)默认 `~/.dsh-task-center`,两者互不相通。
+
 ## 开发
 
 ```sh
@@ -28,3 +116,4 @@ pnpm install
 pnpm run build
 pnpm run test
 ```
+
