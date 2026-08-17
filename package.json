@@ -6,8 +6,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p packages/task/tsconfig.build.json && tsc -p packages/task-local/tsconfig.build.json && tsc -p packages/tool-task/tsconfig.build.json && tsc -p packages/command-task/tsconfig.build.json && tsc -p packages/task-wake/tsconfig.build.json && tsc -p packages/task-quota/tsconfig.build.json && tsc -p packages/task-reaper/tsconfig.build.json",
-    "typecheck": "tsc -p packages/task && tsc -p packages/task-local && tsc -p packages/tool-task && tsc -p packages/command-task && tsc -p packages/task-wake && tsc -p packages/task-quota && tsc -p packages/task-reaper && tsc -p packages/shell",
+    "build": "tsc -p packages/task/tsconfig.build.json && tsc -p packages/task-local/tsconfig.build.json && tsc -p packages/tool-task/tsconfig.build.json && tsc -p packages/command-task/tsconfig.build.json && tsc -p packages/task-wake/tsconfig.build.json && tsc -p packages/task-quota/tsconfig.build.json && tsc -p packages/task-reaper/tsconfig.build.json && tsc -p packages/task-web/tsconfig.build.json && node packages/task-web/scripts/build-client.mjs",
+    "typecheck": "tsc -p packages/task && tsc -p packages/task-local && tsc -p packages/tool-task && tsc -p packages/command-task && tsc -p packages/task-wake && tsc -p packages/task-quota && tsc -p packages/task-reaper && tsc -p packages/task-web && tsc -p packages/shell",
     "test": "pnpm run build && vitest run",
     "start": "pnpm run build && node --experimental-transform-types packages/shell/src/bin.ts"
   },

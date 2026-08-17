@@ -28,6 +28,7 @@ import * as TaskLocal from '@task-center/task-local'
 import * as TaskQuota from '@task-center/task-quota'
 import * as TaskReaper from '@task-center/task-reaper'
 import * as TaskWake from '@task-center/task-wake'
+import TaskWeb from '@task-center/task-web'
 import * as ToolTask from '@task-center/tool-task'
 import * as CommandTask from '@task-center/command-task'
 import * as Shell from '../src/index.ts'
@@ -54,6 +55,7 @@ const modules = new Map<string, unknown>([
   ['@task-center/task-wake', TaskWake],
   ['@task-center/task-quota', TaskQuota],
   ['@task-center/task-reaper', TaskReaper],
+  ['@task-center/task-web', TaskWeb],
   ['@task-center/shell', Shell],
 ])
 

@@ -31,13 +31,17 @@ packages/      @task-center/* 插件包(pnpm workspace)
 corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
 ```
 
-**2. 装包**:从仓库根装入 7 个插件包(`shell` 除外:它是自带 REPL 的独立启动器,与 dsh 的运行模式冲突)——
+**2. 装包**:从仓库根装入 8 个插件包(`shell` 除外:它是自带 REPL 的独立启动器,与 dsh 的运行模式冲突)——
 
 ```sh
 dsh plugin --profile headless add \
   file:./packages/task file:./packages/task-local file:./packages/tool-task \
   file:./packages/command-task file:./packages/task-wake \
   file:./packages/task-quota file:./packages/task-reaper
+dsh plugin --profile web add \
+  file:./packages/task file:./packages/task-local file:./packages/tool-task \
+  file:./packages/command-task file:./packages/task-wake \
+  file:./packages/task-quota file:./packages/task-reaper file:./packages/task-web
 ```
 
 profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板,其他名字从 `dsh-base` 起)。
@@ -102,6 +106,25 @@ dsh --profile headless "某任务"                 # 一次性:建 agent、干�
 dsh web                                        # 浏览器 UI:任务工具进模型,/task 命令面进人类
 dsh --profile <name> --dump-config             # 不启动,只检查组合树
 ```
+
+## Web 看板(task-web)
+
+`@task-center/task-web` 是插件族的 web 原生界面:侧栏底栏「任务看板」按钮点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),与 headless 的 `/task` 面板读同一份账本、走同一个人身份动作面(approve/reject/release/abandon/block 全部 CAS 过版本号,冲突即刷新不覆盖)。
+
+- **宿主半**:Typert Remote 服务,web 客户端经 `/api` 通道调 `task-board/board|show|act|create`。无推送通道,看板打开时 10 秒轮询 + 每次动作后即拉。
+- **浏览器半**:esbuild 打成单个经典脚本,包进 `window.__ModuleLoader__.load({...})` 信封由 web 客户端加载;只 require react 系平台种子,槽位注册进 `sidebar.footer.action`(入口按钮)与 `shell.overlay`(看板浮层)。
+- ⚠ 横幅与按钮上的 ⚠ 点:`staleDays`(默认 3)天内最久未动的开放任务,闲置天数按子树取新鲜值(委托进行中不算搁置)。
+
+web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
+
+```yaml
+    - id: task-web
+      name: '@task-center/task-web'
+      config:
+        staleDays: 3
+```
+
+**坑**:client bundle 的判定与 rev 都按进程缓存——改客户端代码必须 `corepack pnpm run build` 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add。headless profile 不装此包(无 client 消费者)。
 
 **迭代与坑**:
 

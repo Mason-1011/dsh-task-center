@@ -1,0 +1,13 @@
+# Web-board composition: the seam plus its RPC face, nothing else. The board
+# service is a pure projection over ctx.tasks — no sessions, commands, or
+# resident plugins, so the spec drives the ledger directly.
+- id: tasks
+  name: '@task-center/task'
+  config:
+    contextPackByteLimit: 2000
+    listDefaultLimit: 20
+
+- id: task-web
+  name: '@task-center/task-web'
+  config:
+    staleDays: 3

@@ -33,6 +33,8 @@ import type {
 
 export * from './types.ts'
 export { fold, applyMutation, applyProjectMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
+export { idleDays, effectiveIdle } from './idle.ts'
+export type { TaskReader } from './idle.ts'
 export { MemoryTaskStore } from './store.ts'
 export type { TaskStore, LedgerEventInput, LedgerEvent } from './store.ts'
 

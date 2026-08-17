@@ -9,6 +9,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
+import { effectiveIdle } from '@task-center/task'
 import type { ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
 
 /** Cordis plugin name. */
@@ -17,22 +18,13 @@ export const name = 'command-task'
 /** The task seam and the command registry must be present. */
 export const inject = ['tasks', 'commands']
 
+// Re-exported for existing importers; the implementation moved to the seam.
+export { idleDays } from '@task-center/task'
+
 /** Deployment knobs for the human face (no hardcoded tunables). */
 export interface Config {
   /** Idle days at which the panel pins a ⚠ banner over the most-stale open task. Required. */
   readonly staleDays: number
-}
-
-/**
- * Whole days one task has sat since it was last *worked* (`workedAt` — patrol
- * and wake bookkeeping do not refresh it), floored: sub-day idleness and clock
- * skew both read 0.
- * @param at - the record's last-worked instant.
- * @param now - the render time.
- * @returns whole idle days.
- */
-export function idleDays(at: string, now: Date): number {
-  return Math.max(0, Math.floor((now.getTime() - Date.parse(at)) / 86_400_000))
 }
 
 const USAGE = [
@@ -71,31 +63,6 @@ const encoder = new TextEncoder()
 /** Only unfinished work can be shelved: done and archived tasks are not idle. */
 function isOpen(view: TaskView): boolean {
   return !view.archived && view.record.status !== 'done'
-}
-
-/**
- * Effective idle of one view: its own last touch, or fresher when any
- * descendant moved — a parent under live delegation is not shelved. All
- * descendants count, whatever their status: a finishing child is activity.
- * @param ctx - context for reading descendant records.
- * @param view - the task whose idle is asked for.
- * @param now - the render time.
- * @returns whole effective idle days.
- */
-function effectiveIdle(ctx: Context, view: TaskView, now: Date): number {
-  let best = idleDays(view.record.workedAt, now)
-  const queue = [...view.record.subtasks]
-  const seen = new Set<TaskId>([view.record.id])
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    if (seen.has(id)) continue
-    seen.add(id)
-    const child = ctx.tasks.get(id)
-    if (child === undefined) continue
-    best = Math.min(best, idleDays(child.record.workedAt, now))
-    queue.push(...child.record.subtasks)
-  }
-  return best
 }
 
 /** Idle suffix from precomputed effective idle, shown once it crosses a whole day. */
@@ -171,7 +138,7 @@ function panel(ctx: Context, config: Config, now: Date, status?: TaskStatus, pro
     const scope = projectId === undefined ? '' : '该项目下'
     return { kind: 'success', text: status === undefined ? `任务队列${scope}为空` : `${STATUS_LABEL[status]}${scope}为空` }
   }
-  const idler = (view: TaskView): number => effectiveIdle(ctx, view, now)
+  const idler = (view: TaskView): number => effectiveIdle(ctx.tasks, view, now)
   const sections: string[] = []
   // The stalest open task is pinned above every group once it crosses the
   // configured threshold — the "forgot to pick this back up" line.
@@ -222,7 +189,7 @@ function show(ctx: Context, view: TaskView, now: Date): CommandResult {
       record.holder === undefined ? '持有会话: 无' : `持有会话: ${record.holder}`,
       ...record.blockedReason === undefined ? [] : [`阻塞: ${record.blockedReason.code} — ${record.blockedReason.message}`],
       ...record.wakeRule === undefined ? [] : [`定时唤醒: ${describeWake(record.wakeRule)}`],
-      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(child => lineOf(child, effectiveIdle(ctx, child, now))).join('\n')}`],
+      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(child => lineOf(child, effectiveIdle(ctx.tasks, child, now))).join('\n')}`],
       `上下文包(尾部 8 行):\n${pack}`,
     ].join('\n'),
   }
@@ -390,7 +357,7 @@ async function run(ctx: Context, config: Config, rawInput: string): Promise<Comm
         const id = view.record.projectId
         if (id === undefined) continue
         counts.set(id, (counts.get(id) ?? 0) + 1)
-        if (isOpen(view)) idles.set(id, Math.max(idles.get(id) ?? 0, effectiveIdle(ctx, view, now)))
+        if (isOpen(view)) idles.set(id, Math.max(idles.get(id) ?? 0, effectiveIdle(ctx.tasks, view, now)))
       }
       return {
         kind: 'success',
