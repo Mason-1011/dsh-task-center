@@ -245,6 +245,9 @@ importers:
       '@task-center/task-local':
         specifier: workspace:*
         version: link:../task-local
+      '@task-center/task-reaper':
+        specifier: workspace:*
+        version: link:../task-reaper
 
 packages:
 
