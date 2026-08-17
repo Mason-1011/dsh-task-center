@@ -1,0 +1,59 @@
+# Import-driver composition: the full model spine so /task dispatches, minus
+# every resident plugin (wake/quota/reaper/shell). The importer drives a fake
+# clock across historical timestamps — nothing here may schedule or start
+# sessions in reaction. Rows mirror the shipped cordis.yml for the ones kept.
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: !!js process.env.TASK_CENTER_ROOT ?? './.task-center'
+
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+    routes: {}
+
+- id: tasks
+  name: '@task-center/task'
+  config:
+    contextPackByteLimit: 2000
+    # The importer writes a full history in one pass; the panels are the point.
+    listDefaultLimit: 200
+
+- id: task-local
+  name: '@task-center/task-local'
+  config: {}
+
+- id: command-task
+  name: '@task-center/command-task'
+  config:
+    staleDays: 3

@@ -58,11 +58,12 @@ const modules = new Map<string, unknown>([
 ])
 
 /**
- * Boot the shipped composition on one data root through the real Loader.
+ * Boot one composition file on one data root through the real Loader.
  * @param root - Storage root for the ledger.
+ * @param composition - Absolute path to the composition yml to include.
  * @returns the booted context.
  */
-export async function bootCenter(root: string): Promise<Context> {
+export async function bootComposition(root: string, composition: string): Promise<Context> {
   process.env['TASK_CENTER_ROOT'] = root
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root).href + '/'
@@ -76,9 +77,18 @@ export async function bootCenter(root: string): Promise<Context> {
       return module
     },
   } as unknown as NonNullable<typeof ctx.loader.internal>
-  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(yml).href } })
+  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(composition).href } })
   await ctx.loader.await()
   return ctx
+}
+
+/**
+ * Boot the shipped composition on one data root through the real Loader.
+ * @param root - Storage root for the ledger.
+ * @returns the booted context.
+ */
+export function bootCenter(root: string): Promise<Context> {
+  return bootComposition(root, yml)
 }
 
 /** One interactive agent over the booted center, for command dispatch. */
