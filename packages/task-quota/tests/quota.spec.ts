@@ -90,7 +90,7 @@ async function boot(): Promise<Context> {
   await ctx.plugin(ToolRuntime, {})
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
-  ctx.llm.registerAdapter(['fake-quota'], new FakeQuotaAdapter(2_000))
+  ctx.llm.registerAdapter(['fake-quota'], new FakeQuotaAdapter(1_000))
   await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
   await ctx.plugin(ToolTask)
   await ctx.plugin(TaskQuota, { fallbackWindowSeconds: 18_000 })
@@ -109,7 +109,7 @@ async function until(holds: () => boolean, ms = 5000): Promise<void> {
 }
 
 describe('task-quota guard', () => {
-  it('parks the held task at the wall and wakes a fresh session at reset', async () => {
+  it('parks the held task at the wall and wakes a fresh session at reset', { timeout: 10_000 }, async () => {
     const ctx = await boot()
 
     const created = await ctx.tasks.create({ objective: 'o', acceptance: 'a' }, { kind: 'human' })

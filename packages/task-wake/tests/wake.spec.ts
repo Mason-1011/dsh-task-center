@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { LlmAdapter, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -117,5 +118,53 @@ describe('task-wake', () => {
     await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
     await expect(ctx.plugin(TaskWake, { pollSeconds: 0, agent: { provider: 'p', model: 'm' } })).rejects.toThrow('pollSeconds')
     await expect(ctx.plugin(TaskWake, { pollSeconds: 1, agent: { provider: ' ', model: 'm' } })).rejects.toThrow('provider')
+  })
+
+  it('defers firing while the route is quota-walled, then fires when it reopens', { timeout: 10_000 }, async () => {
+    /** Route that dies in QUOTA with a short delay until reopened. */
+    class WallAdapter extends LlmAdapter {
+      walled = true
+
+      providerInfo(provider: string) {
+        return { id: provider, name: `wall ${provider}` }
+      }
+
+      async *stream(): AsyncIterable<StreamChunk> {
+        if (this.walled) {
+          yield { type: 'finish', reason: { kind: 'error', failure: { message: 'usage limit reached', code: QUOTA_EXCEEDED_CODE, providerRetryAfterMs: 150 } } }
+          return
+        }
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'ok' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: 'ok' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime, {})
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
+    const adapter = new WallAdapter()
+    ctx.llm.registerAdapter(['wall'], adapter)
+    await ctx.plugin(TaskWake, { pollSeconds: 0.05, agent: { provider: 'wall', model: 'm' } })
+
+    const handle = await newTask(ctx)
+    const set = await ctx.tasks.mutate(handle.task.record.id, handle.task.record.revision,
+      { operation: 'wake-set', rule: { kind: 'at', scheduledAt: new Date(Date.now() - 1000).toISOString() } }, { kind: 'human' })
+    if ('code' in set) throw new Error(set.code)
+
+    // Walled: the probe defers each tick — occurrence unconsumed, no session fired.
+    await new Promise(resolve => setTimeout(resolve, 400))
+    expect(ctx.tasks.get(handle.task.record.id)?.record.wakeRule).toBeDefined()
+    expect(ctx.agents.list().some(agent => agent.session.id.startsWith(`wake-${handle.task.record.id.slice(0, 8)}`))).toBe(false)
+
+    adapter.walled = false
+    await until(() => ctx.tasks.get(handle.task.record.id)?.record.wakeRule === undefined)
+    await until(() => ctx.agents.list().some(agent => agent.session.id.startsWith(`wake-${handle.task.record.id.slice(0, 8)}`)))
   })
 })
