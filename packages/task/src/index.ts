@@ -26,7 +26,7 @@ import type {
 } from './types.ts'
 
 export * from './types.ts'
-export { foldTasks, applyMutation, TRANSITIONS, appendPackLine } from './fold.ts'
+export { foldTasks, applyMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
 export { MemoryTaskStore } from './store.ts'
 export type { TaskStore, TaskEventInput } from './store.ts'
 
@@ -183,8 +183,13 @@ export class TaskService extends Service {
     return this.commit(taskId, mutation, actor, session)
   }
 
-  /** Wake rules that reached their target, for task-wake. TODO(S2): every-anchor math. */
+  /**
+   * Wake rules that reached their target, for task-wake. Every rule targets
+   * `anchorAt + everySeconds`; the consumer advances the anchor on each fire,
+   * so a due `every` is exactly one occurrence behind the wall clock.
+   */
   wakeRules(): readonly WakeDue[] {
+    const now = Date.now()
     const due: WakeDue[] = []
     for (const view of this.list({ includeArchived: true })) {
       const rule = view.record.wakeRule
@@ -192,8 +197,8 @@ export class TaskService extends Service {
       const target = rule.kind === 'after'
         ? Date.parse(view.record.createdAt) + rule.afterSeconds * 1000
         : rule.kind === 'at' ? Date.parse(rule.scheduledAt)
-          : Date.now() // every: S1 treats each call as due; anchor math lands with task-wake
-      if (Number.isNaN(target) || target <= Date.now() || rule.kind === 'every') {
+          : Date.parse(rule.anchorAt) + rule.everySeconds * 1000
+      if (!Number.isNaN(target) && target <= now) {
         due.push({ taskId: view.record.id, rule, revision: view.record.revision })
       }
     }

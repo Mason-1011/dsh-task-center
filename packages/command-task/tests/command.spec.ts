@@ -204,6 +204,40 @@ describe('command-task', () => {
     expect((approved.result as { text: string }).text).toContain('已归档')
   })
 
+  it('sets and clears wake rules, with seam validation behind the syntax', async () => {
+    const { ctx, agent } = await boot()
+    await dispatch(ctx, agent, '/task create wake me :: eventually')
+    const prefix = ctx.tasks.list({})[0]!.record.id.slice(0, 8)
+
+    const set = await dispatch(ctx, agent, `/task wake ${prefix} every 300`)
+    expect(textOf(set)).toContain('每 300 秒')
+    let rule = ctx.tasks.list({})[0]!.record.wakeRule
+    expect(rule?.kind).toBe('every')
+
+    expect(textOf(await dispatch(ctx, agent, `/task show ${prefix}`))).toContain('定时唤醒: 每 300 秒')
+
+    // The seam rejects a too-frequent interval; the command surfaces the code.
+    const tooSmall = await dispatch(ctx, agent, `/task wake ${prefix} every 60`)
+    expect(tooSmall.result).toMatchObject({ kind: 'error' })
+    expect((tooSmall.result as { text: string }).text).toContain('TASK_WAKE_INVALID_RULE')
+
+    const after = await dispatch(ctx, agent, `/task wake ${prefix} after 300`)
+    expect(textOf(after)).toContain('300 秒后')
+    rule = ctx.tasks.list({})[0]!.record.wakeRule
+    expect(rule).toEqual({ kind: 'after', afterSeconds: 300 })
+
+    const badKind = await dispatch(ctx, agent, `/task wake ${prefix} soon 5`)
+    expect(badKind.result).toMatchObject({ kind: 'error' })
+    expect((badKind.result as { text: string }).text).toContain('未知唤醒类型')
+
+    const cleared = await dispatch(ctx, agent, `/task nowake ${prefix}`)
+    expect(textOf(cleared)).toContain('已取消')
+    expect(ctx.tasks.list({})[0]!.record.wakeRule).toBeUndefined()
+
+    const none = await dispatch(ctx, agent, `/task nowake ${prefix}`)
+    expect(none.result).toMatchObject({ kind: 'error' })
+  })
+
   it('disposes its registration with the plugin fiber', async () => {
     const { ctx, fiber, agent } = await boot()
     expect(ctx.commands.find(agent, 'task')).toBeDefined()

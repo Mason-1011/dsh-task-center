@@ -28,9 +28,9 @@
 | 操作 | 模型(工具) | 人类(命令/面板) | 定时器(task-wake) |
 |---|---|---|---|
 | create / edit / abandon | ✓ | ✓ | — |
-| claim / progress / block / submit | ✓(限当前持有会话) | ✓ | — |
+| claim / progress / block / submit | ✓(限当前持有会话) | ✓ | —(被拉起的会话以模型 actor 走工具面) |
 | approve / reject | **✗** | ✓ | — |
-| wake-set / wake-clear | ✓ | ✓ | — |
+| wake-set / wake-clear | ✓ | ✓ | 仅机械簿记(S5 实现):消费到点——一次性清除、every 推进锚点,且先于起会话提交 |
 
 ## 2. 会话事件(进 `SessionEventMap`,required-on-read)
 

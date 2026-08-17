@@ -7,7 +7,7 @@
 - [x] 模型工具(task_create / task_claim / task_update / task_report / task_query)——S3 已实现
 - [x] 真模型 headless 闭环(创建→认领→推进→提交)——2026-08-17 deepseek-v4-flash 实测通过(loop.e2e.spec.ts)
 - [x] 任务面板:全景、按状态过滤、阻塞置顶、待验收队列——S4 `/task` 命令(command-task)
-- [ ] 定时唤醒(task-wake)
+- [x] 定时唤醒(task-wake)——S5:every 锚点数学 + 唤醒 actor 机械簿记(先消费后触发);实测:到点自动起会话,认领并提交(fire.e2e.spec.ts,2026-08-17,10.6s)
 - [x] 人类验收 / 打回(打回附理由)——S4 `/task approve|reject` 落地;实测:模型提交后人类 `/task approve` 闭环到 done(loop.e2e.spec.ts,2026-08-17)
 
 ## P1(用起来顺的必要件)
@@ -37,4 +37,5 @@
 ## 下一步
 
 - [x] 细化 `task/task` 定义件:状态机转换表 + 会话事件 schema + 工具 schema(→ [05-seam-spec.md](05-seam-spec.md))
-- [ ] 动工决策:是否在本仓库开始实现(见 README 待决问题)
+- [x] 动工决策:另起仓库实现(dsh-task-center),P0 全部落地
+- [ ] P1:跨会话续做演示(会话 A 创建、会话 B 认领续做)、release 动词(持有会话死亡后释放)、子任务委派

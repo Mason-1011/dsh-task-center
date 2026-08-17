@@ -1,6 +1,6 @@
 # @task-center/command-task
 
-**用途一句话**:任务接缝的人类面——一条 `/task` 斜杠命令(面板 / 详情 / 建任务 / 验收 / 打回),approve 与 reject 只在这里合法。
+**用途一句话**:任务接缝的人类面——一条 `/task` 斜杠命令(面板 / 详情 / 建任务 / 定时唤醒 / 验收 / 打回),approve 与 reject 只在这里合法。
 
 ## Model Experience
 
@@ -16,6 +16,8 @@
 | `/task list <status>` | 按状态过滤 | 未知状态 |
 | `/task show <id前缀>` | 单任务详情,含上下文包尾部 8 行 | 无匹配 / 前缀歧义(列出候选) |
 | `/task create <objective> :: <acceptance>` | 人类建任务,交给会话认领 | 缺 `::` / 空段 |
+| `/task wake <id前缀> after <秒> \| at <ISO> \| every <秒>` | 定时唤醒:到点由 task-wake 起新会话做该任务 | TASK_WAKE_INVALID_RULE(every 间隔 ≥ 300 秒等) |
+| `/task nowake <id前缀>` | 取消定时唤醒 | 无规则 / 非待验收状态 |
 | `/task approve <id前缀>` | 验收(review → done),释放持有会话 | 非待验收 / 已归档 |
 | `/task reject <id前缀> <理由>` | 打回(review → active),理由写入 contextPack | 缺理由 / 非待验收 / 已归档 |
 

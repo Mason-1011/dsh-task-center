@@ -68,6 +68,17 @@ describe('transition guards', () => {
     expect(applyMutation(record, { operation: 'approve' }, { actor: actorModel, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
   })
 
+  it('wake-set validates the rule and wake-clear removes it', () => {
+    let record = created()
+    expect(applyMutation(record, { operation: 'wake-set', rule: { kind: 'after', afterSeconds: 0 } }, { actor: actorHuman, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_WAKE_INVALID_RULE', message: expect.any(String) } })
+    expect(applyMutation(record, { operation: 'wake-set', rule: { kind: 'at', scheduledAt: 'not-a-time' } }, { actor: actorHuman, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_WAKE_INVALID_RULE', message: expect.any(String) } })
+    expect(applyMutation(record, { operation: 'wake-set', rule: { kind: 'every', everySeconds: 60, anchorAt: new Date().toISOString() } }, { actor: actorHuman, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_WAKE_INVALID_RULE', message: expect.any(String) } })
+    record = apply({ operation: 'wake-set', rule: { kind: 'after', afterSeconds: 300 } }, record, actorHuman)
+    expect(record.wakeRule).toEqual({ kind: 'after', afterSeconds: 300 })
+    record = apply({ operation: 'wake-clear' }, record, actorHuman)
+    expect(record.wakeRule).toBeUndefined()
+  })
+
   it('non-holder model sessions cannot progress', () => {
     let record = created()
     record = apply({ operation: 'claim' }, record)

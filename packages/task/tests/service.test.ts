@@ -95,11 +95,24 @@ describe('TaskService lifecycle', () => {
     expect(service.list({ includeArchived: true })).toHaveLength(2)
   })
 
-  it('reports due wake rules and skips done tasks', async () => {
+  it('reports due wake rules by target time and skips done tasks', async () => {
     const { service } = setup()
     const taskId = await newTask(service)
-    await service.mutate(taskId, 1, { operation: 'wake-set', rule: { kind: 'after', afterSeconds: 0 } }, human)
-    expect(service.wakeRules()).toHaveLength(1)
+    // 'after 1' targets one second past creation: not yet due.
+    await service.mutate(taskId, 1, { operation: 'wake-set', rule: { kind: 'after', afterSeconds: 1 } }, human)
+    expect(service.wakeRules()).toHaveLength(0)
+
+    // An 'every' anchored in the past is due exactly until its anchor advances.
+    let current = service.get(taskId)!
+    await service.mutate(taskId, current.record.revision, { operation: 'wake-set', rule: { kind: 'every', everySeconds: 300, anchorAt: new Date(Date.now() - 600_000).toISOString() } }, human)
+    const due = service.wakeRules()
+    expect(due).toHaveLength(1)
+    expect(due[0]!.rule.kind).toBe('every')
+    // Advancing the anchor one interval past now clears the due state.
+    current = service.get(taskId)!
+    const advanced = { kind: 'every' as const, everySeconds: 300, anchorAt: new Date(Date.now() + 300_000).toISOString() }
+    await service.mutate(taskId, current.record.revision, { operation: 'wake-set', rule: advanced }, { kind: 'wake' })
+    expect(service.wakeRules()).toHaveLength(0)
 
     const session = Session.create(sessionId)
     await service.claim(taskId, session, model)

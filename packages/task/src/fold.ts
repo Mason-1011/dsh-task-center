@@ -14,6 +14,7 @@ import type {
   TaskOperation,
   TaskRecord,
   TaskStatus,
+  WakeRule,
 } from './types.ts'
 
 /** One transition-table row. */
@@ -47,6 +48,32 @@ const encoder = new TextEncoder()
 /** UTF-8 byte length of one string. */
 function byteLength(value: string): number {
   return encoder.encode(value).length
+}
+
+/** Lower bound for a fixed-rate interval, mirroring dsh-schedule's v1 floor. */
+export const MIN_EVERY_INTERVAL_SECONDS = 300
+
+/**
+ * Validate one wake rule at the seam boundary.
+ * @param rule - candidate rule from any actor.
+ * @returns the rejection message, or `undefined` when the rule is durable.
+ */
+export function checkWakeRule(rule: WakeRule): string | undefined {
+  if (rule.kind === 'after') {
+    if (!Number.isSafeInteger(rule.afterSeconds) || rule.afterSeconds <= 0) {
+      return 'after requires a positive safe-integer delay in seconds'
+    }
+    return undefined
+  }
+  if (rule.kind === 'at') {
+    if (Number.isNaN(Date.parse(rule.scheduledAt))) return 'at requires a parseable ISO-8601 instant'
+    return undefined
+  }
+  if (!Number.isSafeInteger(rule.everySeconds) || rule.everySeconds < MIN_EVERY_INTERVAL_SECONDS) {
+    return `every requires a safe-integer interval of at least ${MIN_EVERY_INTERVAL_SECONDS} seconds`
+  }
+  if (Number.isNaN(Date.parse(rule.anchorAt))) return 'every requires a parseable ISO-8601 anchor'
+  return undefined
 }
 
 /** Bounded context-pack append. Over-budget heads are dropped with a marker line. */
@@ -176,6 +203,8 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       break
     }
     case 'wake-set': {
+      const rejected = checkWakeRule(mutation.rule)
+      if (rejected !== undefined) return error('TASK_WAKE_INVALID_RULE', rejected)
       next.wakeRule = mutation.rule
       break
     }

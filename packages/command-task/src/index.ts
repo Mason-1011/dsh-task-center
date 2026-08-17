@@ -9,7 +9,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
-import type { TaskError, TaskStatus, TaskView } from '@task-center/task'
+import type { TaskError, TaskStatus, TaskView, WakeRule } from '@task-center/task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
@@ -24,6 +24,9 @@ const USAGE = [
   '  /task show <id前缀>          — 单任务详情,含上下文包尾部',
   '  /task create <objective> :: <acceptance>',
   '                               — 人类建任务,交给会话认领',
+  '  /task wake <id前缀> after <秒> | at <ISO时刻> | every <秒>',
+  '                               — 定时唤醒:到点起新会话做该任务',
+  '  /task nowake <id前缀>        — 取消定时唤醒',
   '  /task approve <id前缀>       — 验收通过(review → done)',
   '  /task reject <id前缀> <理由> — 打回(review → active),理由必填',
 ].join('\n')
@@ -45,7 +48,8 @@ const encoder = new TextEncoder()
 function lineOf(view: TaskView): string {
   const holder = view.record.holder === undefined ? '' : ` @${view.record.holder}`
   const pack = view.record.contextPack === '' ? '' : ` · pack ${encoder.encode(view.record.contextPack).length}B`
-  return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${pack}`
+  const wake = view.record.wakeRule === undefined ? '' : ' · ⏰'
+  return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${pack}${wake}`
 }
 
 /** Every live or archived task, so prefix matching never misses over the cap. */
@@ -87,6 +91,13 @@ function panel(ctx: Context, status?: TaskStatus): CommandResult {
   return { kind: 'success', text: sections.join('\n\n') }
 }
 
+/** Human-readable wake rule. */
+function describeWake(rule: WakeRule): string {
+  if (rule.kind === 'after') return `${rule.afterSeconds} 秒后`
+  if (rule.kind === 'at') return `定点 ${rule.scheduledAt}`
+  return `每 ${rule.everySeconds} 秒(锚点 ${rule.anchorAt})`
+}
+
 /** Detail view of one task, ending with the context-pack tail. */
 function show(view: TaskView): CommandResult {
   const record = view.record
@@ -99,6 +110,7 @@ function show(view: TaskView): CommandResult {
       `验收: ${record.acceptance}`,
       record.holder === undefined ? '持有会话: 无' : `持有会话: ${record.holder}`,
       ...record.blockedReason === undefined ? [] : [`阻塞: ${record.blockedReason.code} — ${record.blockedReason.message}`],
+      ...record.wakeRule === undefined ? [] : [`定时唤醒: ${describeWake(record.wakeRule)}`],
       `上下文包(尾部 8 行):\n${pack}`,
     ].join('\n'),
   }
@@ -160,6 +172,37 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
     return 'code' in rejected
       ? failure(rejected)
       : { kind: 'success', text: `已打回 [${record.id.slice(0, 8)}]:${reason}` }
+  }
+
+  if (sub === 'wake' || sub === 'nowake') {
+    const prefix = tail.split(/\s+/, 1)[0] ?? ''
+    if (prefix === '') return { kind: 'error', text: USAGE }
+    const found = resolve(allTasks(ctx), prefix)
+    if ('error' in found) return { kind: 'error', text: found.error }
+    const { record } = found.view
+    if (sub === 'nowake') {
+      if (record.wakeRule === undefined) return { kind: 'error', text: `[${record.id.slice(0, 8)}] 没有定时唤醒规则` }
+      const cleared = await ctx.tasks.mutate(record.id, record.revision, { operation: 'wake-clear' }, { kind: 'human' })
+      return 'code' in cleared
+        ? failure(cleared)
+        : { kind: 'success', text: `已取消 [${record.id.slice(0, 8)}] 的定时唤醒` }
+    }
+    const [kind, arg] = tail.slice(prefix.length).trim().split(/\s+/, 2)
+    if (kind === undefined || arg === undefined || arg === '') {
+      return { kind: 'error', text: 'wake 需要 after <秒> / at <ISO时刻> / every <秒> 三选一' }
+    }
+    if (kind !== 'after' && kind !== 'at' && kind !== 'every') {
+      return { kind: 'error', text: `未知唤醒类型 ${kind},可用:after | at | every` }
+    }
+    const rule: WakeRule = kind === 'after'
+      ? { kind: 'after', afterSeconds: Number(arg) }
+      : kind === 'at'
+        ? { kind: 'at', scheduledAt: arg }
+        : { kind: 'every', everySeconds: Number(arg), anchorAt: new Date().toISOString() }
+    const set = await ctx.tasks.mutate(record.id, record.revision, { operation: 'wake-set', rule }, { kind: 'human' })
+    return 'code' in set
+      ? failure(set)
+      : { kind: 'success', text: `已设定 [${record.id.slice(0, 8)}] 定时唤醒:${describeWake(rule)}` }
   }
 
   return { kind: 'error', text: `未知子命令 ${sub}\n${USAGE}` }
