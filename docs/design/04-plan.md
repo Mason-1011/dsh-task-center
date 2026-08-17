@@ -5,7 +5,7 @@
 - [x] 任务对象与状态机(`task` + `task-local`)——S1/S2 已实现
 - [x] 跨会话认领 + 上下文包注入——claim 写 `task/context-injected` 回执
 - [x] 模型工具(task_create / task_claim / task_update / task_report / task_query)——S3 已实现
-- [ ] 真模型 headless 闭环(创建→认领→推进→提交)——待 DEEPSEEK_API_KEY
+- [x] 真模型 headless 闭环(创建→认领→推进→提交)——2026-08-17 deepseek-v4-flash 实测通过(loop.e2e.spec.ts)
 - [ ] 任务面板:全景、按状态过滤、阻塞置顶、待验收队列
 - [ ] 定时唤醒(task-wake)
 - [ ] 人类验收 / 打回(打回附理由)——接缝已备(approve/reject 人类专属),缺命令/面板通道
