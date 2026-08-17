@@ -59,7 +59,7 @@ async function boot(): Promise<void> {
     await ctx.plugin(TaskLocal),
     await ctx.plugin(ToolTask),
     await ctx.plugin(CommandRuntime),
-    await ctx.plugin(CommandTask),
+    await ctx.plugin(CommandTask, { staleDays: 3 }),
   ]
   void fibers
 }

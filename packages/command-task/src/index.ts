@@ -9,7 +9,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
-import type { ProjectView, TaskError, TaskStatus, TaskView, WakeRule } from '@task-center/task'
+import type { ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
@@ -17,9 +17,26 @@ export const name = 'command-task'
 /** The task seam and the command registry must be present. */
 export const inject = ['tasks', 'commands']
 
+/** Deployment knobs for the human face (no hardcoded tunables). */
+export interface Config {
+  /** Idle days at which the panel pins a ⚠ banner over the most-stale open task. Required. */
+  readonly staleDays: number
+}
+
+/**
+ * Whole days one task has sat since its last domain event (`updatedAt`),
+ * floored: sub-day idleness and clock skew both read 0.
+ * @param at - the record's last-touch instant.
+ * @param now - the render time.
+ * @returns whole idle days.
+ */
+export function idleDays(at: string, now: Date): number {
+  return Math.max(0, Math.floor((now.getTime() - Date.parse(at)) / 86_400_000))
+}
+
 const USAGE = [
   '用法:',
-  '  /task                        — 全景面板:按项目分组,组内阻塞置顶',
+  '  /task                        — 全景面板:按项目分组,组内阻塞置顶;未完结任务标闲置天数,最久搁置置顶标 ⚠',
   '  /task list <status>          — 按状态过滤(todo|active|blocked|review|done)',
   '  /task show <id前缀>          — 单任务详情,含子任务与上下文包尾部',
   '  /task create <objective> :: <acceptance> [under <id前缀>] [in <项目名或前缀>]',
@@ -50,13 +67,48 @@ const STATUS_LABEL: Readonly<Record<TaskStatus, string>> = {
 
 const encoder = new TextEncoder()
 
+/** Only unfinished work can be shelved: done and archived tasks are not idle. */
+function isOpen(view: TaskView): boolean {
+  return !view.archived && view.record.status !== 'done'
+}
+
+/**
+ * Effective idle of one view: its own last touch, or fresher when any
+ * descendant moved — a parent under live delegation is not shelved. All
+ * descendants count, whatever their status: a finishing child is activity.
+ * @param ctx - context for reading descendant records.
+ * @param view - the task whose idle is asked for.
+ * @param now - the render time.
+ * @returns whole effective idle days.
+ */
+function effectiveIdle(ctx: Context, view: TaskView, now: Date): number {
+  let best = idleDays(view.record.updatedAt, now)
+  const queue = [...view.record.subtasks]
+  const seen = new Set<TaskId>([view.record.id])
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    const child = ctx.tasks.get(id)
+    if (child === undefined) continue
+    best = Math.min(best, idleDays(child.record.updatedAt, now))
+    queue.push(...child.record.subtasks)
+  }
+  return best
+}
+
+/** Idle suffix from precomputed effective idle, shown once it crosses a whole day. */
+function idleSuffix(view: TaskView, days: number): string {
+  return !isOpen(view) || days < 1 ? '' : ` · 闲置 ${days} 天`
+}
+
 /** One line of the panel for one task view. */
-function lineOf(view: TaskView): string {
+function lineOf(view: TaskView, idle: number): string {
   const holder = view.record.holder === undefined ? '' : ` @${view.record.holder}`
   const pack = view.record.contextPack === '' ? '' : ` · pack ${encoder.encode(view.record.contextPack).length}B`
   const wake = view.record.wakeRule === undefined ? '' : ' · ⏰'
   const spawn = view.record.subtasks.length === 0 ? '' : ` · ⊕${view.record.subtasks.length}`
-  return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${pack}${wake}${spawn}`
+  return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${idleSuffix(view, idle)}${pack}${wake}${spawn}`
 }
 
 /** Every live or archived task, so prefix matching never misses over the cap. */
@@ -78,7 +130,9 @@ function resolve(list: readonly TaskView[], prefix: string): { view: TaskView } 
   const matches = list.filter(view => view.record.id.startsWith(prefix))
   if (matches.length === 1) return { view: matches[0]! }
   if (matches.length === 0) return { error: `没有以 ${prefix} 开头的任务` }
-  return { error: `前缀 ${prefix} 匹配多个任务:\n${matches.map(lineOf).join('\n')}` }
+  // The picker listing drops the idle marker: without the ledger context it
+  // would show raw own-task idleness, misleading under live delegation.
+  return { error: `前缀 ${prefix} 匹配多个任务:\n${matches.map(view => lineOf(view, 0)).join('\n')}` }
 }
 
 /** One seam error as a human-readable command error. */
@@ -87,9 +141,10 @@ function failure(error: TaskError): CommandResult {
 }
 
 /** One project section: status subgroups in PANEL_ORDER under its header. */
-function projectSection(marker: string, name: string, views: TaskView[], status?: TaskStatus): string {
-  const header = `${marker} ${name} (${views.length})`
-  if (status !== undefined) return `${header}\n${views.map(lineOf).join('\n')}`
+function projectSection(marker: string, name: string, views: TaskView[], idler: (view: TaskView) => number, status?: TaskStatus): string {
+  const headerIdle = Math.max(0, ...views.filter(isOpen).map(idler))
+  const header = `${marker} ${name} (${views.length})${headerIdle < 1 ? '' : ` · 闲置 ${headerIdle} 天`}`
+  if (status !== undefined) return `${header}\n${views.map(view => lineOf(view, idler(view))).join('\n')}`
   const groups = new Map<TaskStatus, TaskView[]>()
   for (const view of views) {
     const bucket = groups.get(view.record.status) ?? []
@@ -100,13 +155,13 @@ function projectSection(marker: string, name: string, views: TaskView[], status?
     .filter(state => groups.has(state))
     .map(state => {
       const bucket = groups.get(state)!
-      return `  ${STATUS_LABEL[state]} (${bucket.length})\n${bucket.map(lineOf).join('\n')}`
+      return `  ${STATUS_LABEL[state]} (${bucket.length})\n${bucket.map(view => lineOf(view, idler(view))).join('\n')}`
     })
   return [header, ...sections].join('\n')
 }
 
 /** The panel, grouped by project first and status inside each group. */
-function panel(ctx: Context, status?: TaskStatus, projectId?: ProjectView['record']['id']): CommandResult {
+function panel(ctx: Context, config: Config, now: Date, status?: TaskStatus, projectId?: ProjectView['record']['id']): CommandResult {
   const views = ctx.tasks.list({
     ...status === undefined ? {} : { status },
     ...projectId === undefined ? {} : { projectId },
@@ -114,6 +169,15 @@ function panel(ctx: Context, status?: TaskStatus, projectId?: ProjectView['recor
   if (views.length === 0) {
     const scope = projectId === undefined ? '' : '该项目下'
     return { kind: 'success', text: status === undefined ? `任务队列${scope}为空` : `${STATUS_LABEL[status]}${scope}为空` }
+  }
+  const idler = (view: TaskView): number => effectiveIdle(ctx, view, now)
+  const sections: string[] = []
+  // The stalest open task is pinned above every group once it crosses the
+  // configured threshold — the "forgot to pick this back up" line.
+  const stalest = views.filter(isOpen)
+    .reduce<TaskView | undefined>((worst, view) => worst === undefined || idler(view) > idler(worst) ? view : worst, undefined)
+  if (stalest !== undefined && idler(stalest) >= config.staleDays) {
+    sections.push(`⚠ 搁置最久(闲置 ${idler(stalest)} 天)\n${lineOf(stalest, idler(stalest))}`)
   }
   // Group by project in creation order; tasks of archived projects stay in
   // their group (readable), and unassigned tasks land in the trailing bucket.
@@ -124,14 +188,13 @@ function panel(ctx: Context, status?: TaskStatus, projectId?: ProjectView['recor
     if (id === undefined) unassigned.push(view)
     else byProject.set(id, [...(byProject.get(id) ?? []), view])
   }
-  const sections: string[] = []
   for (const project of ctx.tasks.projects()) {
     const bucket = byProject.get(project.record.id)
     if (bucket === undefined) continue
     const label = project.record.archived ? `${project.record.name} · 已归档` : project.record.name
-    sections.push(projectSection('📅', label, bucket, status))
+    sections.push(projectSection('📅', label, bucket, idler, status))
   }
-  if (unassigned.length > 0) sections.push(projectSection('🗑', '无项目', unassigned, status))
+  if (unassigned.length > 0) sections.push(projectSection('🗑', '无项目', unassigned, idler, status))
   return { kind: 'success', text: sections.join('\n\n') }
 }
 
@@ -143,7 +206,7 @@ function describeWake(rule: WakeRule): string {
 }
 
 /** Detail view of one task, its live children, and the context-pack tail. */
-function show(ctx: Context, view: TaskView): CommandResult {
+function show(ctx: Context, view: TaskView, now: Date): CommandResult {
   const record = view.record
   const pack = record.contextPack === '' ? '(尚无记录)' : record.contextPack.split('\n').slice(-8).join('\n')
   const children = ctx.tasks.children(record.id).filter(child => !child.archived)
@@ -158,30 +221,31 @@ function show(ctx: Context, view: TaskView): CommandResult {
       record.holder === undefined ? '持有会话: 无' : `持有会话: ${record.holder}`,
       ...record.blockedReason === undefined ? [] : [`阻塞: ${record.blockedReason.code} — ${record.blockedReason.message}`],
       ...record.wakeRule === undefined ? [] : [`定时唤醒: ${describeWake(record.wakeRule)}`],
-      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(lineOf).join('\n')}`],
+      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(child => lineOf(child, effectiveIdle(ctx, child, now))).join('\n')}`],
       `上下文包(尾部 8 行):\n${pack}`,
     ].join('\n'),
   }
 }
 
 /** Parse the human actor's typed line and run one subcommand. */
-async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
+async function run(ctx: Context, config: Config, rawInput: string): Promise<CommandResult> {
+  const now = new Date()
   const input = rawInput.trim()
-  if (input === '') return panel(ctx)
+  if (input === '') return panel(ctx, config, now)
   const head = input.split(/\s+/, 1)[0]!
   const tail = input.slice(head.length).trim()
   const sub = head.toLowerCase()
 
   if (sub === 'list') {
-    if (tail === '') return panel(ctx)
+    if (tail === '') return panel(ctx, config, now)
     if (!(tail in STATUS_LABEL)) return { kind: 'error', text: `未知状态 ${tail},可用:todo|active|blocked|review|done` }
-    return panel(ctx, tail as TaskStatus)
+    return panel(ctx, config, now, tail as TaskStatus)
   }
 
   if (sub === 'show') {
     if (tail === '') return { kind: 'error', text: USAGE }
     const found = resolve(allTasks(ctx), tail)
-    return 'error' in found ? { kind: 'error', text: found.error } : show(ctx, found.view)
+    return 'error' in found ? { kind: 'error', text: found.error } : show(ctx, found.view, now)
   }
 
   if (sub === 'create') {
@@ -320,13 +384,19 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
       const projects = ctx.tasks.projects()
       if (projects.length === 0) return { kind: 'success', text: '还没有项目;/task project create <名> 建一个' }
       const counts = new Map<string, number>()
+      const idles = new Map<string, number>()
       for (const view of ctx.tasks.list({})) {
-        if (view.record.projectId !== undefined) counts.set(view.record.projectId, (counts.get(view.record.projectId) ?? 0) + 1)
+        const id = view.record.projectId
+        if (id === undefined) continue
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+        if (isOpen(view)) idles.set(id, Math.max(idles.get(id) ?? 0, effectiveIdle(ctx, view, now)))
       }
       return {
         kind: 'success',
-        text: projects.map(view =>
-          `- ${view.record.name} [${view.record.id.slice(0, 8)}] · ${counts.get(view.record.id) ?? 0} 个任务${view.record.archived ? ' · 已归档' : ''}`).join('\n'),
+        text: projects.map(view => {
+          const idle = idles.get(view.record.id) ?? 0
+          return `- ${view.record.name} [${view.record.id.slice(0, 8)}] · ${counts.get(view.record.id) ?? 0} 个任务${view.record.archived ? ' · 已归档' : ''}${idle < 1 ? '' : ` · 闲置 ${idle} 天`}`
+        }).join('\n'),
       }
     }
     const verb = tail.split(/\s+/, 1)[0]!.toLowerCase()
@@ -361,7 +431,7 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
     // Anything else is a project key: show that project's own panel.
     const found = resolveProject(ctx, tail)
     if ('error' in found) return { kind: 'error', text: found.error }
-    return panel(ctx, undefined, found.view.record.id)
+    return panel(ctx, config, now, undefined, found.view.record.id)
   }
 
   return { kind: 'error', text: `未知子命令 ${sub}\n${USAGE}` }
@@ -372,13 +442,17 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
  * human types (objective, acceptance, reject reason) lands in the task domain
  * event; `command/done` carries the human-readable outcome.
  * @param ctx - Plugin context.
+ * @param config - The stale-banner threshold in days.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config): void {
+  if (!Number.isInteger(config.staleDays) || config.staleDays < 1) {
+    throw new Error(`command-task config staleDays must be a positive integer of days, got ${String(config.staleDays)}`)
+  }
   const definition: CommandDefinition = {
     name: 'task',
     description: '任务面板:全景 / 详情 / 建任务 / 验收 / 打回',
     recordInput: false,
-    handler: ({ rawInput }) => run(ctx, rawInput),
+    handler: ({ rawInput }) => run(ctx, config, rawInput),
   }
   ctx.commands.register(definition)
 }

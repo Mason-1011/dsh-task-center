@@ -1,12 +1,13 @@
 /**
  * Keyless command tests over the real dsh command registry and the real task
  * seam: the human round trip (create → model work → approve/reject), the panel
- * grouping, prefix resolution, the closed status guards, and the
- * `command/run`↔`command/done` lifecycle pairing in the dispatching session.
+ * grouping, prefix resolution, the closed status guards, shelving visibility
+ * (idle days, stale banner), and the `command/run`↔`command/done` lifecycle
+ * pairing in the dispatching session.
  * @module @task-center/command-task/tests/command
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
@@ -23,8 +24,10 @@ import { TaskService } from '@task-center/task'
 import type { TaskActor, TaskView } from '@task-center/task'
 import * as CommandTask from '../src/index.ts'
 
+const DAY_MS = 86_400_000
+
 /** Boot the agent spine, the command registry, the seam, and command-task. */
-async function boot(): Promise<{ ctx: Context; fiber: Fiber; agent: Agent }> {
+async function boot(staleDays = 3): Promise<{ ctx: Context; fiber: Fiber; agent: Agent }> {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
@@ -35,7 +38,7 @@ async function boot(): Promise<{ ctx: Context; fiber: Fiber; agent: Agent }> {
   await ctx.plugin(llmDeepseek, {})
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
-  const fiber = await ctx.plugin(CommandTask)
+  const fiber = await ctx.plugin(CommandTask, { staleDays })
   const agent = ctx.agentLoop.create(SessionId('cmd-panel'), {
     provider: 'deepseek-official',
     model: 'deepseek-v4-flash',
@@ -193,6 +196,59 @@ describe('command-task', () => {
     expect(refused.result.kind).toBe('error')
     const stillThere = await dispatch(ctx, agent, '/task')
     expect(textOf(stillThere)).toContain('家务 · 已归档 (1)')
+  })
+
+  it('marks idle days, pins the stalest open task, and stays quiet when fresh', async () => {
+    const { ctx, agent } = await boot()
+    try {
+      // Backdate through the fake clock at the commit layer: the ledger's
+      // last-touch instants are the only idle input.
+      const present = Date.now()
+      vi.useFakeTimers()
+      vi.setSystemTime(present - 4.5 * DAY_MS)
+      await dispatch(ctx, agent, '/task project create 迁移')
+      await dispatch(ctx, agent, '/task create 旧账 :: 数字全对 in 迁移')
+      await dispatch(ctx, agent, '/task create 长线 :: 全链路通 in 迁移')
+      vi.setSystemTime(present - 2.5 * DAY_MS)
+      await dispatch(ctx, agent, '/task create 新事 :: 三句话')
+      vi.setSystemTime(present)
+      const views = ctx.tasks.list({})
+      const parent = views.find(view => view.record.objective === '长线')!
+      // A fresh child under the four-day-old parent: delegation is activity.
+      await dispatch(ctx, agent, `/task create 子活 :: 一步 under ${parent.record.id.slice(0, 8)}`)
+      const finished = await submitAsModel(ctx, views.find(view => view.record.objective === '新事')!)
+      await dispatch(ctx, agent, `/task approve ${finished.record.id.slice(0, 8)}`)
+
+      const panel = textOf(await dispatch(ctx, agent, '/task'))
+      // The stale banner rides above every group; the done task never carries
+      // idle, and the parent under live delegation stays unmarked.
+      expect(panel).toContain('⚠ 搁置最久(闲置 4 天)')
+      expect(panel).toContain('待办: 旧账 · 闲置 4 天')
+      expect(panel.indexOf('⚠ 搁置最久')).toBeLessThan(panel.indexOf('📅 迁移'))
+      expect(panel).toContain('📅 迁移 (2) · 闲置 4 天')
+      expect(panel).not.toContain('长线 · 闲置')
+      expect(panel).not.toContain('已完成: 新事 · 闲置')
+      // The project listing carries the same per-project idle.
+      const listing = textOf(await dispatch(ctx, agent, '/task project'))
+      expect(listing).toContain('迁移 [')
+      expect(listing).toContain('2 个任务 · 闲置 4 天')
+
+      // Below the banner threshold the ⚠ disappears; a whole idle day still
+      // marks the line, sub-day idleness stays silent.
+      vi.setSystemTime(present - 2.6 * DAY_MS)
+      const fresh = textOf(await dispatch(ctx, agent, '/task'))
+      expect(fresh).not.toContain('⚠ 搁置最久')
+      expect(fresh).toContain('旧账 · 闲置 1 天')
+      expect(fresh).not.toContain('长线 · 闲置')
+      expect(fresh).not.toContain('新事 · 闲置')
+    } finally {
+      vi.useRealTimers()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('fails loud on a non-positive staleDays config', async () => {
+    await expect(boot(0)).rejects.toThrow('staleDays')
   })
 
   it('panels blocked work first and filters by status', async () => {

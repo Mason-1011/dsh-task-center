@@ -7,7 +7,7 @@
 | `task/task` | 定义件(Service) | `ctx.tasks`:状态机转换、项目(§1.2 of 05)、contextPack 读写、`task/*` 与 `project/*` 事件 |
 | `task/task-local` | Provider | 经 `ctx.storageDomain.open(taskDomainSpec)` 开域;后端由配置路由(json/sqlite) |
 | `task/tool-task` | Consumer(模型) | `task_create(可带父/项目) / task_claim / task_update / task_report / task_query(可按父查子/按项目收窄) / task_projects` 六工具 + 提示词段 |
-| `task/command-task` + `client/ui-task` | Consumer(人类) | `/task` 命令(面板按项目两级分组)+ `/task project` 建改归档;Web 面板(全景/过滤/阻塞置顶/待验收队列/跳转会话) |
+| `task/command-task` + `client/ui-task` | Consumer(人类) | `/task` 命令(面板按项目两级分组,标闲置天数、最久搁置 ≥ staleDays 置顶 ⚠,闲置为子树感知口径)+ `/task project` 建改归档;Web 面板(全景/过滤/阻塞置顶/待验收队列/跳转会话) |
 | `task/task-wake` | Provider(时间) | 宿主级定时器,见 §2 |
 | `task/task-quota` | Provider(额度) | 观察 `llm/stream` 会话失败,QUOTA 即挂起并释放持有;重置点经 task-wake 唤醒续做 |
 | `task/task-reaper` | Provider(存活) | 会话处置事件 + 挂载清扫,system actor 释放死持有(崩溃恢复) |

@@ -57,6 +57,8 @@
 
 - id: command-task
   name: '@task-center/command-task'
+  config:
+    staleDays: 3
 
 - id: task-wake
   name: '@task-center/task-wake'
