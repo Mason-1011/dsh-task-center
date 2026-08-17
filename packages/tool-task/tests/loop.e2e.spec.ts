@@ -1,8 +1,9 @@
 /**
  * Real-model closed loop (e2e): boots the full published agent spine with the
  * DeepSeek provider and the task packages, then lets one live model session
- * walk 创建 → 认领 → 推进 → 提交 through the five task tools. Self-skips
- * without DEEPSEEK_API_KEY, matching the harness e2e key policy.
+ * walk 创建 → 认领 → 推进 → 提交 through the five task tools — and the human
+ * actor closes it with `/task approve`. Self-skips without DEEPSEEK_API_KEY,
+ * matching the harness e2e key policy.
  * @module @task-center/tool-task/tests/loop-e2e
  */
 
@@ -13,6 +14,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import * as llmDeepseek from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -22,6 +24,7 @@ import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
+import * as CommandTask from '@task-center/command-task'
 import * as TaskLocal from '@task-center/task-local'
 import * as ToolTask from '../src/index.ts'
 
@@ -55,6 +58,8 @@ async function boot(): Promise<void> {
     await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 }),
     await ctx.plugin(TaskLocal),
     await ctx.plugin(ToolTask),
+    await ctx.plugin(CommandRuntime),
+    await ctx.plugin(CommandTask),
   ]
   void fibers
 }
@@ -62,7 +67,7 @@ async function boot(): Promise<void> {
 const suite = process.env.DEEPSEEK_API_KEY === undefined ? describe.skip : describe
 
 suite('real-model task loop', () => {
-  it('walks create → claim → update → submit through the live DeepSeek provider', { timeout: 240_000 }, async () => {
+  it('walks create → claim → update → submit → human approve through the live DeepSeek provider', { timeout: 240_000 }, async () => {
     await boot()
 
     const agent = ctx.agentLoop.create(SessionId('task-loop-1'), {
@@ -82,11 +87,19 @@ suite('real-model task loop', () => {
 
     const tasks = ctx.tasks.list({})
     expect(tasks).toHaveLength(1)
-    const task = tasks[0]!
+    let task = tasks[0]!
     expect(task.record.status).toBe('review')
     expect(task.record.objective).toContain('hello')
     expect(task.record.contextPack).not.toBe('')
     expect(task.record.contextPack).toContain('SUBMITTED')
+
+    // The human actor closes the loop: the command never reaches the model.
+    const approved = await ctx.commands.execute(agent, `/task approve ${task.record.id.slice(0, 8)}`, AbortSignal.timeout(10_000))
+    expect(approved?.result.kind).toBe('success')
+    task = ctx.tasks.list({})[0]!
+    expect(task.record.status).toBe('done')
+    expect(task.record.holder).toBeUndefined()
+    expect(agent.session.events.some(event => event.type === 'command/done')).toBe(true)
 
     // The durable ledger holds the whole exchange, receipts included.
     expect((await readdir(root)).some(file => file.endsWith('.json'))).toBe(true)
