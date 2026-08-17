@@ -9,7 +9,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
-import type { TaskError, TaskStatus, TaskView, WakeRule } from '@task-center/task'
+import type { ProjectView, TaskError, TaskStatus, TaskView, WakeRule } from '@task-center/task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
@@ -19,11 +19,16 @@ export const inject = ['tasks', 'commands']
 
 const USAGE = [
   '用法:',
-  '  /task                        — 全景面板:阻塞置顶、待验收、在办、待办',
+  '  /task                        — 全景面板:按项目分组,组内阻塞置顶',
   '  /task list <status>          — 按状态过滤(todo|active|blocked|review|done)',
-  '  /task show <id前缀>          — 单任务详情,含上下文包尾部',
-  '  /task create <objective> :: <acceptance> [under <id前缀>]',
-  '                               — 人类建任务,交给会话认领;under 指定父任务即分解',
+  '  /task show <id前缀>          — 单任务详情,含子任务与上下文包尾部',
+  '  /task create <objective> :: <acceptance> [under <id前缀>] [in <项目名或前缀>]',
+  '                               — 人类建任务,交给会话认领;under 指定父任务即分解,in 归入项目',
+  '  /task project                — 项目列表(含计数)',
+  '  /task project create <名>    — 建项目',
+  '  /task project rename <名或前缀> <新名>',
+  '  /task project archive <名或前缀> — 归档项目(已有任务保留可读,不再接收新任务)',
+  '  /task project <名或前缀>     — 该项目的任务面板',
   '  /task wake <id前缀> after <秒> | at <ISO时刻> | every <秒>',
   '                               — 定时唤醒:到点起新会话做该任务',
   '  /task nowake <id前缀>        — 取消定时唤醒',
@@ -59,6 +64,15 @@ function allTasks(ctx: Context): TaskView[] {
   return ctx.tasks.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
 }
 
+/** Resolve one project by name or id prefix; ambiguity lists candidates. */
+function resolveProject(ctx: Context, key: string): { view: ProjectView } | { error: string } {
+  const matches = ctx.tasks.projects().filter(view =>
+    view.record.id.startsWith(key) || view.record.name.startsWith(key))
+  if (matches.length === 1) return { view: matches[0]! }
+  if (matches.length === 0) return { error: `没有以 ${key} 开头的项目名或 id` }
+  return { error: `前缀 ${key} 匹配多个项目:\n${matches.map(p => `- ${p.record.name} [${p.record.id.slice(0, 8)}]${p.record.archived ? ' · 已归档' : ''}`).join('\n')}` }
+}
+
 /** Resolve one id prefix to a unique task, or an error naming the candidates. */
 function resolve(list: readonly TaskView[], prefix: string): { view: TaskView } | { error: string } {
   const matches = list.filter(view => view.record.id.startsWith(prefix))
@@ -72,12 +86,10 @@ function failure(error: TaskError): CommandResult {
   return { kind: 'error', text: `${error.code}: ${error.message}` }
 }
 
-/** The panel, grouped by status in PANEL_ORDER with counts. */
-function panel(ctx: Context, status?: TaskStatus): CommandResult {
-  const views = ctx.tasks.list(status === undefined ? {} : { status })
-  if (views.length === 0) {
-    return { kind: 'success', text: status === undefined ? '任务队列为空' : `${STATUS_LABEL[status]}队列为空` }
-  }
+/** One project section: status subgroups in PANEL_ORDER under its header. */
+function projectSection(marker: string, name: string, views: TaskView[], status?: TaskStatus): string {
+  const header = `${marker} ${name} (${views.length})`
+  if (status !== undefined) return `${header}\n${views.map(lineOf).join('\n')}`
   const groups = new Map<TaskStatus, TaskView[]>()
   for (const view of views) {
     const bucket = groups.get(view.record.status) ?? []
@@ -88,8 +100,38 @@ function panel(ctx: Context, status?: TaskStatus): CommandResult {
     .filter(state => groups.has(state))
     .map(state => {
       const bucket = groups.get(state)!
-      return `${STATUS_LABEL[state]} (${bucket.length})\n${bucket.map(lineOf).join('\n')}`
+      return `  ${STATUS_LABEL[state]} (${bucket.length})\n${bucket.map(lineOf).join('\n')}`
     })
+  return [header, ...sections].join('\n')
+}
+
+/** The panel, grouped by project first and status inside each group. */
+function panel(ctx: Context, status?: TaskStatus, projectId?: ProjectView['record']['id']): CommandResult {
+  const views = ctx.tasks.list({
+    ...status === undefined ? {} : { status },
+    ...projectId === undefined ? {} : { projectId },
+  })
+  if (views.length === 0) {
+    const scope = projectId === undefined ? '' : '该项目下'
+    return { kind: 'success', text: status === undefined ? `任务队列${scope}为空` : `${STATUS_LABEL[status]}${scope}为空` }
+  }
+  // Group by project in creation order; tasks of archived projects stay in
+  // their group (readable), and unassigned tasks land in the trailing bucket.
+  const byProject = new Map<ProjectView['record']['id'], TaskView[]>()
+  const unassigned: TaskView[] = []
+  for (const view of views) {
+    const id = view.record.projectId
+    if (id === undefined) unassigned.push(view)
+    else byProject.set(id, [...(byProject.get(id) ?? []), view])
+  }
+  const sections: string[] = []
+  for (const project of ctx.tasks.projects()) {
+    const bucket = byProject.get(project.record.id)
+    if (bucket === undefined) continue
+    const label = project.record.archived ? `${project.record.name} · 已归档` : project.record.name
+    sections.push(projectSection('📅', label, bucket, status))
+  }
+  if (unassigned.length > 0) sections.push(projectSection('🗑', '无项目', unassigned, status))
   return { kind: 'success', text: sections.join('\n\n') }
 }
 
@@ -105,12 +147,14 @@ function show(ctx: Context, view: TaskView): CommandResult {
   const record = view.record
   const pack = record.contextPack === '' ? '(尚无记录)' : record.contextPack.split('\n').slice(-8).join('\n')
   const children = ctx.tasks.children(record.id).filter(child => !child.archived)
+  const projectName = record.projectId === undefined ? undefined : ctx.tasks.project(record.projectId)?.record.name
   return {
     kind: 'success',
     text: [
       `${record.id} · r${record.revision} · ${STATUS_LABEL[record.status]}${view.archived ? ' · 已归档' : ''}`,
       `目标: ${record.objective}`,
       `验收: ${record.acceptance}`,
+      ...projectName === undefined ? [] : [`项目: ${projectName}`],
       record.holder === undefined ? '持有会话: 无' : `持有会话: ${record.holder}`,
       ...record.blockedReason === undefined ? [] : [`阻塞: ${record.blockedReason.code} — ${record.blockedReason.message}`],
       ...record.wakeRule === undefined ? [] : [`定时唤醒: ${describeWake(record.wakeRule)}`],
@@ -141,20 +185,42 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
   }
 
   if (sub === 'create') {
-    // An optional trailing `under <prefix>` links the new task under a parent.
-    const spawn = /^(.*)\s+under\s+(\S+)$/.exec(tail)
-    const body = spawn === null ? tail : spawn[1]!
+    // Optional trailing `under <parent>` and `in <project>` qualifiers, either order-insensitive strip.
+    const inMatch = /^(.*)\s+in\s+(\S+)$/.exec(tail)
+    const withoutIn = inMatch === null ? tail : inMatch[1]!
+    const projectKey = inMatch?.[2]
+    const spawn = /^(.*)\s+under\s+(\S+)$/.exec(withoutIn)
+    const body = spawn === null ? withoutIn : spawn[1]!
     const parentPrefix = spawn?.[2]
     const separator = body.indexOf('::')
     if (separator === -1) return { kind: 'error', text: 'create 需要 <objective> :: <acceptance> 两段,以 :: 分隔' }
     const objective = body.slice(0, separator).trim()
     const acceptance = body.slice(separator + 2).trim()
     if (objective === '' || acceptance === '') return { kind: 'error', text: 'objective 与 acceptance 都不能为空' }
-    const created = await ctx.tasks.create({ objective, acceptance }, { kind: 'human' })
+    // Resolve the project first: a bad key archives nothing because nothing exists yet.
+    let project: ProjectView | undefined
+    if (projectKey !== undefined) {
+      const found = resolveProject(ctx, projectKey)
+      if ('error' in found) return { kind: 'error', text: found.error }
+      if (found.view.record.archived) {
+        return { kind: 'error', text: `项目 ${found.view.record.name} 已归档,不再接收新任务` }
+      }
+      project = found.view
+    }
+    const created = await ctx.tasks.create({
+      objective, acceptance,
+      ...project === undefined ? {} : { projectId: project.record.id },
+    }, { kind: 'human' })
     if ('code' in created) return failure(created)
     const childId = created.task.record.id
     if (parentPrefix === undefined) {
-      return { kind: 'success', text: `已创建 [${childId.slice(0, 8)}] ${objective}` }
+      return {
+        kind: 'success',
+        text: [
+          `已创建 [${childId.slice(0, 8)}] ${objective}`,
+          ...project === undefined ? [] : [`归入项目 ${project.record.name}`],
+        ].join('\n'),
+      }
     }
     const found = resolve(allTasks(ctx), parentPrefix)
     if ('error' in found) {
@@ -170,7 +236,11 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
     }
     return {
       kind: 'success',
-      text: `已创建 [${childId.slice(0, 8)}] ${objective}\n挂接为 [${found.view.record.id.slice(0, 8)}] 的子任务`,
+      text: [
+        `已创建 [${childId.slice(0, 8)}] ${objective}`,
+        `挂接为 [${found.view.record.id.slice(0, 8)}] 的子任务`,
+        ...project === undefined ? [] : [`归入项目 ${project.record.name}`],
+      ].join('\n'),
     }
   }
 
@@ -243,6 +313,55 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
     return 'code' in released
       ? failure(released)
       : { kind: 'success', text: `已释放 [${record.id.slice(0, 8)}],回到待办可认领` }
+  }
+
+  if (sub === 'project') {
+    if (tail === '') {
+      const projects = ctx.tasks.projects()
+      if (projects.length === 0) return { kind: 'success', text: '还没有项目;/task project create <名> 建一个' }
+      const counts = new Map<string, number>()
+      for (const view of ctx.tasks.list({})) {
+        if (view.record.projectId !== undefined) counts.set(view.record.projectId, (counts.get(view.record.projectId) ?? 0) + 1)
+      }
+      return {
+        kind: 'success',
+        text: projects.map(view =>
+          `- ${view.record.name} [${view.record.id.slice(0, 8)}] · ${counts.get(view.record.id) ?? 0} 个任务${view.record.archived ? ' · 已归档' : ''}`).join('\n'),
+      }
+    }
+    const verb = tail.split(/\s+/, 1)[0]!.toLowerCase()
+    const rest = tail.slice(verb.length).trim()
+    if (verb === 'create') {
+      if (rest === '') return { kind: 'error', text: 'project create 需要非空项目名' }
+      const created = await ctx.tasks.projectCreate(rest, { kind: 'human' })
+      return 'code' in created
+        ? failure(created)
+        : { kind: 'success', text: `已建项目 ${created.project.record.name} [${created.project.record.id.slice(0, 8)}]` }
+    }
+    if (verb === 'rename' || verb === 'archive') {
+      const key = rest.split(/\s+/, 1)[0] ?? ''
+      if (key === '') return { kind: 'error', text: USAGE }
+      const found = resolveProject(ctx, key)
+      if ('error' in found) return { kind: 'error', text: found.error }
+      const { record } = found.view
+      if (verb === 'archive') {
+        if (record.archived) return { kind: 'error', text: `项目 ${record.name} 已归档` }
+        const archived = await ctx.tasks.projectMutate(record.id, record.revision, { operation: 'project-archive' }, { kind: 'human' })
+        return 'code' in archived
+          ? failure(archived)
+          : { kind: 'success', text: `已归档项目 ${record.name};其任务保留可读,新任务不再归入` }
+      }
+      const newName = rest.slice(key.length).trim()
+      if (newName === '') return { kind: 'error', text: 'project rename 需要 <名或前缀> <新名> 两段' }
+      const renamed = await ctx.tasks.projectMutate(record.id, record.revision, { operation: 'project-rename', name: newName }, { kind: 'human' })
+      return 'code' in renamed
+        ? failure(renamed)
+        : { kind: 'success', text: `已重命名 ${record.name} → ${newName}` }
+    }
+    // Anything else is a project key: show that project's own panel.
+    const found = resolveProject(ctx, tail)
+    if ('error' in found) return { kind: 'error', text: found.error }
+    return panel(ctx, undefined, found.view.record.id)
   }
 
   return { kind: 'error', text: `未知子命令 ${sub}\n${USAGE}` }

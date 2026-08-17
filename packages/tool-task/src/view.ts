@@ -6,7 +6,7 @@
  */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { TaskError, TaskErrorCode, TaskView } from '@task-center/task'
+import type { ProjectView, TaskError, TaskErrorCode, TaskView } from '@task-center/task'
 
 /** One task as the model sees it: identity, discipline fields, and the pack. */
 export interface TaskToolTask {
@@ -16,10 +16,19 @@ export interface TaskToolTask {
   readonly objective: string
   readonly acceptance: string
   readonly workspaceIds: string[]
+  readonly projectId: string | null
   readonly holder: string | null
   readonly blockedReason?: { code: string; message: string }
   readonly subtasks: string[]
   readonly contextPack: string
+}
+
+/** One project as the model sees it: human-managed grouping metadata. */
+export interface TaskToolProject {
+  readonly id: string
+  readonly revision: number
+  readonly name: string
+  readonly archived: boolean
 }
 
 /** Closed tool-error union; codes are the stable model-facing discriminants. */
@@ -50,6 +59,9 @@ export type TaskToolValue = TaskToolTask | TaskToolError
 
 /** Success value of task_query. */
 export type TaskToolListValue = readonly TaskToolTask[] | TaskToolError
+
+/** Success value of task_projects. */
+export type TaskToolProjectListValue = readonly TaskToolProject[] | TaskToolError
 
 /** Map one seam error to its model-facing code. */
 const TOOL_CODES: Readonly<Record<TaskErrorCode, TaskToolErrorCode>> = {
@@ -101,8 +113,14 @@ export function taskToolTask(view: TaskView): TaskToolTask {
       blockedReason: { code: record.blockedReason.code, message: record.blockedReason.message },
     },
     subtasks: [...record.subtasks],
+    projectId: record.projectId === undefined ? null : record.projectId,
     contextPack: record.contextPack,
   }
+}
+
+/** Project one project view for the model. */
+export function taskToolProject(view: ProjectView): TaskToolProject {
+  return { id: view.record.id, revision: view.record.revision, name: view.record.name, archived: view.record.archived }
 }
 
 /** JSON Schema of {@link TaskToolTask}. */
@@ -116,6 +134,7 @@ export const TASK_SCHEMA = {
     objective: { type: 'string', required: true },
     acceptance: { type: 'string', required: true },
     workspaceIds: { type: 'array', required: true, items: { type: 'string' } },
+    projectId: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
     holder: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
     blockedReason: {
       type: 'object',
@@ -166,6 +185,26 @@ export const TASK_OUTPUT_SCHEMA = { oneOf: [TASK_SCHEMA, ...ERROR_SCHEMAS] } as 
 export const LIST_OUTPUT_SCHEMA = {
   oneOf: [
     { type: 'array', items: TASK_SCHEMA },
+    ...ERROR_SCHEMAS,
+  ],
+} as const
+
+/** JSON Schema of {@link TaskToolProject}. */
+export const PROJECT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', required: true },
+    revision: { type: 'integer', required: true },
+    name: { type: 'string', required: true },
+    archived: { type: 'boolean', required: true },
+  },
+} as const
+
+/** Output schema of task_projects. */
+export const PROJECTS_OUTPUT_SCHEMA = {
+  oneOf: [
+    { type: 'array', items: PROJECT_SCHEMA },
     ...ERROR_SCHEMAS,
   ],
 } as const

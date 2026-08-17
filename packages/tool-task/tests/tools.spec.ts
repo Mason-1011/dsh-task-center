@@ -14,7 +14,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TaskService } from '@task-center/task'
 import * as ToolTask from '../src/index.ts'
-import type { TaskToolError, TaskToolListValue, TaskToolTask, TaskToolValue } from '../src/index.ts'
+import type { TaskToolError, TaskToolListValue, TaskToolProjectListValue, TaskToolTask, TaskToolValue } from '../src/index.ts'
 
 /** Boot system-prompt, the tool registry, the seam, and tool-task. */
 async function boot(): Promise<{ ctx: Context; toolFiber: Fiber }> {
@@ -61,7 +61,7 @@ describe('tool-task', () => {
   it('registers the five tools and no approval tool', async () => {
     const { ctx } = await boot()
     const names = ctx.tools.schemas().map(schema => schema.name)
-    for (const name of ['task_create', 'task_claim', 'task_update', 'task_report', 'task_query']) {
+    for (const name of ['task_create', 'task_claim', 'task_update', 'task_report', 'task_query', 'task_projects']) {
       expect(names).toContain(name)
     }
     // approve/reject stay human-only: the tool face never registers them.
@@ -163,6 +163,30 @@ describe('tool-task', () => {
     const childClaimed = await ok(ctx, 'task_claim', { task_id: child.id }, execOf(strangerSession))
     expect(childClaimed.holder).toBe(strangerId as never)
     await ok(ctx, 'task_update', { task_id: child.id, revision: childClaimed.revision, note: 'delegate worked' }, execOf(strangerSession))
+  })
+
+  it('assigns tasks to human-managed projects and filters by them', async () => {
+    const { ctx } = await boot()
+    // Projects are human-managed: seed one through the seam, not a tool.
+    const created = await ctx.tasks.projectCreate('发布', { kind: 'human' })
+    if ('code' in created) throw new Error(created.code)
+    const projectId = created.project.record.id
+
+    const projects = await tool(ctx, 'task_projects').execute({}, execOf()) as TaskToolProjectListValue
+    if ('code' in projects) throw new Error(projects.code)
+    expect(projects).toEqual([{ id: projectId, revision: 1, name: '发布', archived: false }])
+
+    const task = await ok(ctx, 'task_create', { objective: 'o', acceptance: 'a', project_id: projectId })
+    expect(task.projectId).toBe(projectId)
+
+    const scoped = await tool(ctx, 'task_query').execute({ project_id: projectId }, execOf()) as TaskToolListValue
+    if ('code' in scoped) throw new Error(scoped.code)
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]!.projectId).toBe(projectId)
+
+    // Assignment failures map into the closed union and never create a task.
+    expect((await fail(ctx, 'task_create', { objective: 'x', acceptance: 'y', project_id: 'nope' })).code).toBe('not_found')
+    expect(ctx.tasks.list({}).some(view => view.record.objective === 'x')).toBe(false)
   })
 
   it('disposes its registrations with the plugin fiber', async () => {

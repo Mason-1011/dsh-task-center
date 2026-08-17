@@ -151,6 +151,50 @@ describe('command-task', () => {
     expect(ctx.tasks.list({ includeArchived: true, limit: 100 }).filter(view => view.record.objective === '无家可归' && !view.archived)).toHaveLength(0)
   })
 
+  it('manages projects and groups the panel by them', async () => {
+    const { ctx, agent } = await boot()
+    const empty = await dispatch(ctx, agent, '/task project')
+    expect(textOf(empty)).toContain('还没有项目')
+
+    const created = await dispatch(ctx, agent, '/task project create 发布季度报告')
+    expect(textOf(created)).toContain('已建项目 发布季度报告')
+    await dispatch(ctx, agent, '/task project create 日常维护')
+
+    // create … in 归入项目;无项目任务落进收尾分组。
+    await dispatch(ctx, agent, '/task create 数据核对 :: 数字全对 in 发布')
+    await dispatch(ctx, agent, '/task create 写摘要 :: 三句话 in 日常')
+    await dispatch(ctx, agent, '/task create 整理桌面 :: 文件归位')
+
+    const panel = await dispatch(ctx, agent, '/task')
+    const text = textOf(panel)
+    expect(text).toContain('📅 发布季度报告 (1)')
+    expect(text).toContain('📅 日常维护 (1)')
+    expect(text).toContain('🗑 无项目 (1)')
+    // Projects come before the unassigned bucket.
+    expect(text.indexOf('📅 发布季度报告')).toBeLessThan(text.indexOf('🗑 无项目'))
+
+    const listing = await dispatch(ctx, agent, '/task project')
+    expect(textOf(listing)).toContain('发布季度报告')
+    expect(textOf(listing)).toContain('1 个任务')
+
+    const scoped = await dispatch(ctx, agent, '/task project 日常')
+    expect(textOf(scoped)).toContain('写摘要')
+    expect(textOf(scoped)).not.toContain('数据核对')
+
+    const detail = await dispatch(ctx, agent, `/task show ${ctx.tasks.list({})[0]!.record.id.slice(0, 8)}`)
+    expect(textOf(detail)).toContain('项目: 发布季度报告')
+
+    const renamed = await dispatch(ctx, agent, '/task project rename 日常 家务')
+    expect(textOf(renamed)).toContain('已重命名 日常维护 → 家务')
+    // Archived projects stop receiving tasks but keep their group readable.
+    const archived = await dispatch(ctx, agent, '/task project archive 家务')
+    expect(textOf(archived)).toContain('已归档项目 家务')
+    const refused = await dispatch(ctx, agent, '/task create 再来一件 :: x in 家务')
+    expect(refused.result.kind).toBe('error')
+    const stillThere = await dispatch(ctx, agent, '/task')
+    expect(textOf(stillThere)).toContain('家务 · 已归档 (1)')
+  })
+
   it('panels blocked work first and filters by status', async () => {
     const { ctx, agent } = await boot()
     expect(textOf(await dispatch(ctx, agent, '/task'))).toBe('任务队列为空')

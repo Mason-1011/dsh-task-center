@@ -45,3 +45,6 @@
 - [x] P1:子任务委派·域动词(subtask-add/remove)——2026-08-17:转换表行(todo/active/blocked,不动状态)、per-record 查重在 fold、跨记录守卫(存在/非自身/防环 BFS)在服务提交层、`children()` 聚合读取;tool-task 错误映射补 `invalid_subtask`,zod 持久化枚举同步(吃过的亏),重启往返含挂接事件
 - [x] P1:子任务委派·工具/命令面——2026-08-17:`task_create` 带可选 `parent_task_id`(挂接被拒即回收新建任务,单一效果),任务投影带 `subtasks`,`task_query` 带 `parent_task_id` 走 `children()` 聚合;命令面 `create … under <父>`、`show` 展开子任务、面板行 `⊕N` 计数
 - [x] P1:子任务委派·真模型闭环(delegate.e2e.spec.ts,26.1s)——2026-08-17:会话 A 认领父任务并以 parent_task_id 分解出数数子任务,会话 B(父任务的陌生人)以 parent_task_id 查子、认领子任务数到 3 提交,人类验收;父任务全程由 A 持有,`children()` 聚合读到子任务 done——两个会话同时持有两个任务,委派而非转手
+- [x] P1:项目分组·域动词——2026-08-17:任务与项目共用一条域事件流(一次 fold 产出 `{tasks, projects, archivedTasks}`),项目仅人类建改归档(PROJECT_FORBIDDEN),无状态机只有 archived 标记;create/edit 携带 projectId(键在且非空即挂入、null 即移出),提交层 append 前校验、fold 重放后查悬挂引用
+- [x] P1:项目分组·工具/命令面——2026-08-17:`task_projects` 六号工具(创建序含归档标记),`task_create`/`task_query` 带 project_id(被拒挂入连任务都不建);命令面 `/task project` 建改归档与局部面板、`create … in <项目名或前缀>`、面板两级分组(项目 → 状态,已归档项目标注并继续展示,`🗑 无项目` 收尾)、`show` 带项目行
+- [x] P1:项目分组·真模型闭环(project.e2e.spec.ts,8.7s)——2026-08-17:人类建「文档维护」项目,模型 task_projects 发现它、task_create 以列表返回的精确 id 归入、task_query 按项目收窄确认——模型全程没有编造 id

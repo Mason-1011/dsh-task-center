@@ -1,8 +1,8 @@
 /**
- * The five model tools over `ctx.tasks`: task_create, task_claim, task_update,
- * task_report, task_query. Registered globally like tool-goal; every mutation
- * runs as the calling agent's model actor, so the service writes both ledgers
- * (domain event plus the session's task/change receipt).
+ * The six model tools over `ctx.tasks`: task_create, task_claim, task_update,
+ * task_report, task_query, task_projects. Registered globally like tool-goal;
+ * every mutation runs as the calling agent's model actor, so the service
+ * writes both ledgers (domain event plus the session's task/change receipt).
  * Spec: docs/design/05-seam-spec.md §6.
  * @module @task-center/tool-task/src/tools
  */
@@ -13,12 +13,14 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { TaskActor, TaskError, TaskStatus, TaskView } from '@task-center/task'
-import { TaskId as taskIdOf } from '@task-center/task'
+import { TaskId as taskIdOf, ProjectId as projectIdOf } from '@task-center/task'
 import {
   internalError,
   LIST_OUTPUT_SCHEMA,
+  PROJECTS_OUTPUT_SCHEMA,
   renderValue,
   TASK_OUTPUT_SCHEMA,
+  taskToolProject,
   taskToolTask,
   toolError,
 } from './view.ts'
@@ -59,7 +61,8 @@ const CREATE_DESCRIPTION =
   + 'approves or rejects the submitted work. objective states the outcome; acceptance lists the concrete '
   + 'criteria a submitted result will be checked against — write them as verifiable statements. '
   + 'parent_task_id links the new task as a subtask of a task you hold (decomposition); if the link is '
-  + 'refused the creation is withdrawn and the refusal is returned.'
+  + 'refused the creation is withdrawn and the refusal is returned. project_id assigns the task to a '
+  + 'project a human manages — list them with task_projects; assignment may also fail the creation.'
 
 const CLAIM_DESCRIPTION =
   'Claim one todo task for this session and receive its full context pack. Read the pack before working: '
@@ -78,13 +81,19 @@ const REPORT_DESCRIPTION =
 
 const QUERY_DESCRIPTION =
   'Query tasks by filter. Omit every filter to list current non-archived tasks. parent_task_id instead '
-  + 'lists that task\'s live children — use it to watch delegated subtasks. Use the exact id and '
-  + 'revision from the results for claim, update, and report calls.'
+  + 'lists that task\'s live children — use it to watch delegated subtasks. project_id narrows either '
+  + 'listing to one project. Use the exact id and revision from the results for claim, update, and '
+  + 'report calls.'
+
+const PROJECTS_DESCRIPTION =
+  'List the projects a human manages, in creation order. Projects group tasks for the human\'s board; '
+  + 'they are created, renamed, and archived by humans only — use an id from this list as task_create\'s '
+  + 'project_id and never invent one.'
 
 /**
- * Register the five task tools on `ctx`.
+ * Register the six task tools on `ctx`.
  * @param ctx - Context carrying `tasks` and `tools`.
- * @returns aggregate disposer removing all five registrations.
+ * @returns aggregate disposer removing all six registrations.
  */
 export function registerTaskTools(ctx: Context): () => void {
   const disposers: Array<() => void> = []
@@ -108,15 +117,22 @@ export function registerTaskTools(ctx: Context): () => void {
           type: 'string',
           description: 'Optional exact id of the parent task to link this task under.',
         },
+        project_id: {
+          type: 'string',
+          description: 'Optional exact project id from task_projects to assign the task to.',
+        },
       },
       output: { schema: TASK_OUTPUT_SCHEMA, render: renderValue },
       async execute(args, exec) {
         const who = caller(exec)
         if ('code' in who) return who
+        // The seam validates the project reference before appending, so a
+        // refused assignment (missing or archived) never creates the task.
         const created = await ctx.tasks.create({
           objective: args.objective,
           acceptance: args.acceptance,
           ...args.workspace_ids === undefined ? {} : { workspaceIds: args.workspace_ids },
+          ...args.project_id === undefined ? {} : { projectId: projectIdOf(args.project_id) },
         }, actor(who.session))
         if ('code' in created) return toolError(created)
         if (args.parent_task_id === undefined) return taskToolTask(created.task)
@@ -240,6 +256,7 @@ export function registerTaskTools(ctx: Context): () => void {
           description: 'Optional exact status filter.',
         },
         workspace_id: { type: 'string', description: 'Optional workspace filter.' },
+        project_id: { type: 'string', description: 'Optional exact project id from task_projects.' },
         parent_task_id: { type: 'string', description: 'Optional exact id; list this task\'s live children.' },
         limit: { type: 'number', description: 'Optional positive safe-integer result cap.' },
       },
@@ -261,10 +278,24 @@ export function registerTaskTools(ctx: Context): () => void {
         return ctx.tasks.list({
           ...args.status === undefined ? {} : { status: args.status as TaskStatus },
           ...args.workspace_id === undefined ? {} : { workspaceId: args.workspace_id },
+          ...args.project_id === undefined ? {} : { projectId: projectIdOf(args.project_id) },
           ...args.limit === undefined ? {} : { limit: args.limit },
         }).map(taskToolTask)
       },
       presentCall: args => present('Query tasks', 'read', args.status),
+    })))
+
+    disposers.push(ctx.tools.register(defineTool({
+      name: 'task_projects',
+      description: PROJECTS_DESCRIPTION,
+      parameters: {},
+      output: { schema: PROJECTS_OUTPUT_SCHEMA, render: renderValue },
+      async execute(_args, exec) {
+        const who = caller(exec)
+        if ('code' in who) return who
+        return ctx.tasks.projects().map(taskToolProject)
+      },
+      presentCall: () => present('Query projects', 'read'),
     })))
   } catch (error) {
     for (const dispose of disposers.reverse()) dispose()

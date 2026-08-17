@@ -41,6 +41,20 @@
 
 `subtask-add` 的守卫分两层:查重在 fold(纯、单记录、重放可见);存在性、自身、防环在服务提交层(需要看到**其他**任务的记录,fold 拿不到)。防环规则:从候选 child 出发沿 `subtasks` 下行可达 parent 即成环——A→B 已挂时 B→A 拒绝。聚合读取 `children(taskId)` 按 `subtasks` 顺序返回子任务视图(含归档),供父任务侧汇总进度。
 
+### 1.2 项目:同一账本里的第二族实体
+
+项目与任务共用一条域事件流(一个 store、一次 fold),不是独立服务。操作闭集 `project-create / project-rename / project-archive`:
+
+| 操作 | 守卫条件 | 失败错误码 |
+|---|---|---|
+| `project-create` | 仅人类 actor;名称非空;id 未被占用 | `PROJECT_FORBIDDEN` / `PROJECT_INVALID_NAME` / `PROJECT_ALREADY_EXISTS` |
+| `project-rename` | 仅人类 actor;目标存在且未归档;新名称非空 | `PROJECT_FORBIDDEN` / `PROJECT_NOT_FOUND` / `PROJECT_ARCHIVED` / `PROJECT_INVALID_NAME` |
+| `project-archive` | 仅人类 actor;目标存在且未归档 | `PROJECT_FORBIDDEN` / `PROJECT_NOT_FOUND` / `PROJECT_ARCHIVED` |
+
+项目没有状态机,只有 `archived` 标记(记录内字段,不同于任务的域全局归档集合)。归档项目不再接收新任务,但其分组与任务保持可读——面板继续展示,`PROJECT_ARCHIVED` 只拦新的挂入。
+
+任务的 `create`/`edit` 可携带 `projectId`:**键存在且非空即挂入,键存在且为 null 即移出**(edit 专用)。引用完整性双向强制:服务提交层在 append 前校验项目存在且未归档(被拒的挂入不产生任何事件);fold 重放后做悬挂引用检查,任务指向不存在的项目即抛错——账本损坏要炸在明处。
+
 ## 2. 会话事件(进 `SessionEventMap`,required-on-read)
 
 ### `task/change` —— 模型视角的回执
@@ -87,16 +101,22 @@ type TaskDomainEvent = {
 
 **双账本一致性(包 invariant 的内容)**:任一 `taskId+revision` 的会话 `task/change` 事件,必能在域事件流找到同 `taskId+revision`、且 actor.sessionId 属于该任务 `sessionIds` 的域事件;`TaskRecord` 等于域事件流的 fold 结果。
 
+域事件流是任务与项目两族实体共用的账本:`change.kind === 'project/change'` 的事件走 `ProjectDomainEvent`(同构 envelope,`actor` 仅人类)。fold 一次产出 `{ tasks, projects, archivedTasks }`,重放后校验跨族引用(§1.2)。
+
 ## 4. 服务 API(`ctx.tasks`)
 
 | 方法 | 说明 |
 |---|---|
 | `create(input): Promise<TaskHandle>` | 建任务;handle 含 disposer(未 claim 前可撤) |
 | `get(taskId): Promise<TaskView \| undefined>` | 单个读 |
-| `list(filter): Promise<TaskView[]>` | 按 status / workspaceId / archived 过滤 |
+| `list(filter): Promise<TaskView[]>` | 按 status / workspaceId / projectId / archived 过滤 |
 | `claim(taskId, session): Promise<TaskView>` | 持有者登记 |
 | `mutate(taskId, expectedRevision, change): Promise<TaskView>` | 所有转换的单一入口(比较置换) |
 | `wakeRules(): AsyncIterable<WakeDue>` | task-wake 消费:当前到点的唤醒规则 |
+| `projects(): readonly ProjectView[]` | 项目列表,创建序,含已归档 |
+| `project(projectId): ProjectView \| undefined` | 单个项目读 |
+| `projectCreate(name, actor): Promise<ProjectHandle>` | 建项目;handle 含 disposer(dispose 即归档) |
+| `projectMutate(id, expectedRevision, mutation, actor): Promise<ProjectView>` | 项目改名/归档(比较置换) |
 
 `TaskView` = TaskRecord 的只读投影 + 派生项(持有会话、是否阻塞超时)。
 
@@ -104,6 +124,7 @@ type TaskDomainEvent = {
 
 ```ts
 'task/changed'(payload: { operation: TaskOperation; task: TaskView }): void
+'project/changed'(payload: { operation: ProjectOperation; project: ProjectView }): void
 ```
 
 - **非 agent 作用域**(任务跨会话,面板全局订阅)——与 goal 的 agent-scoped 派发是刻意的不对称;
@@ -113,13 +134,14 @@ type TaskDomainEvent = {
 
 | 工具 | 输入 | 成功值 | 错误并集 |
 |---|---|---|---|
-| `task_create` | objective, acceptance, workspaceIds?, parentTaskId? | TaskView(含 subtasks id 列表) | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask / stale_revision |
+| `task_create` | objective, acceptance, workspaceIds?, parentTaskId?, projectId? | TaskView(含 subtasks id 列表) | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask / stale_revision |
 | `task_claim` | taskId | TaskView + contextPack(同时产生 `task/context-injected` 会话事件) | not_found / already_claimed |
 | `task_update` | taskId, revision, note, next? | TaskView | not_claimed / stale_revision / invalid_note |
 | `task_report` | taskId, revision, outcome: `'blocked' \| 'review'`, reason?, completionNote? | TaskView | invalid_transition / invalid_reason / invalid_note |
-| `task_query` | filter(status?, workspaceId?, parentTaskId?, limit?) | TaskView[] | invalid_filter / not_found |
+| `task_query` | filter(status?, workspaceId?, projectId?, parentTaskId?, limit?) | TaskView[] | invalid_filter / not_found |
+| `task_projects` | —(无参数) | ProjectView[](创建序,含已归档标记) | —(读路径无失败分支) |
 
-`parentTaskId` 语义:先建子任务、再以调用会话挂接到父;挂接被拒(非父持有者、父不存在、成环)即**回收刚建的任务**(abandon,同一 model actor)并返回拒绝码——工具保持单一效果。`task_query` 带 parentTaskId 时改走 `children()` 聚合读取(滤归档),模型据此看委派子任务的实时状态。
+`parentTaskId` 语义:先建子任务、再以调用会话挂接到父;挂接被拒(非父持有者、父不存在、成环)即**回收刚建的任务**(abandon,同一 model actor)并返回拒绝码——工具保持单一效果。`projectId` 同理但更简单:seam 在 append 前校验项目存在且未归档,被拒的挂入**连任务都不建**(无需回收)。`task_query` 带 parentTaskId 时改走 `children()` 聚合读取(滤归档),模型据此看委派子任务的实时状态;带 projectId 时按项目收窄任一列表。
 
 错误形状一律 `{ code, message }`(仿 schedule 的 ScheduleToolError 闭集)。提示词段:一段"任务纪律"(claim 前先读 pack;submit 必须对照 acceptance;blocked 要说清缺什么),order 仿 tool-goal。
 

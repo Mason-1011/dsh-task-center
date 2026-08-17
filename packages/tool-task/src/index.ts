@@ -1,5 +1,5 @@
 /**
- * `tool-task`: the model face of the task seam. Registers the five task tools
+ * `tool-task`: the model face of the task seam. Registers the six task tools
  * and one system-prompt discipline section, globally like tool-goal.
  * @module @task-center/tool-task
  */
@@ -11,14 +11,17 @@ export { registerTaskTools } from './tools.ts'
 export {
   internalError,
   LIST_OUTPUT_SCHEMA,
+  PROJECTS_OUTPUT_SCHEMA,
+  PROJECT_SCHEMA,
   renderValue,
   TASK_OUTPUT_SCHEMA,
   TASK_SCHEMA,
+  taskToolProject,
   taskToolTask,
   toolError,
 } from './view.ts'
 export type {
-  TaskToolError, TaskToolErrorCode, TaskToolListValue, TaskToolTask, TaskToolValue,
+  TaskToolError, TaskToolErrorCode, TaskToolListValue, TaskToolProject, TaskToolProjectListValue, TaskToolTask, TaskToolValue,
 } from './view.ts'
 
 /** Cordis plugin name. */
@@ -41,7 +44,7 @@ const TASK_DISCIPLINE = [
 ].join('\n')
 
 /**
- * Register the task discipline section and the five tools.
+ * Register the task discipline section and the six tools.
  * @param ctx - Plugin context.
  */
 export function apply(ctx: Context): void {
