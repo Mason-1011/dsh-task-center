@@ -7,8 +7,8 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { TaskService, TaskId } from '../src/index.ts'
-import type { TaskHandle } from '../src/index.ts'
+import { TaskService, TaskId, ProjectId } from '../src/index.ts'
+import type { ProjectHandle, TaskHandle } from '../src/index.ts'
 import type { TaskActor, TaskError, TaskView } from '../src/types.ts'
 
 function setup(): { ctx: Context; service: TaskService } {
@@ -25,6 +25,12 @@ function handle(result: TaskHandle | TaskError): TaskHandle {
 
 /** Narrow a service result to its view, failing on the error variant. */
 function view(result: TaskView | TaskError): TaskView {
+  if ('code' in result) throw new Error(result.code)
+  return result
+}
+
+/** Narrow a project result to its handle, failing on the error variant. */
+function projectHandle(result: ProjectHandle | TaskError): ProjectHandle {
   if ('code' in result) throw new Error(result.code)
   return result
 }
@@ -128,6 +134,39 @@ describe('TaskService lifecycle', () => {
     await created.dispose()
     expect(created.task.record.id && service.list({ includeArchived: true })[0]!.archived).toBe(true)
     expect(service.list({})).toHaveLength(0)
+  })
+
+  it('groups tasks under human-managed projects with live reference checks', async () => {
+    const { ctx, service } = setup()
+    const seenOps: string[] = []
+    ctx.on('project/changed', ({ operation }) => seenOps.push(operation))
+
+    // Projects are human-managed: a model actor never creates one.
+    expect(await service.projectCreate('发布', model)).toMatchObject({ code: 'PROJECT_FORBIDDEN' })
+    const release = projectHandle(await service.projectCreate('发布', human))
+    const research = projectHandle(await service.projectCreate('调研', human))
+    expect(service.projects().map(p => p.record.name)).toEqual(['发布', '调研'])
+
+    // Assignment at create, reassignment by edit, and the list filter.
+    const inRelease = handle(await service.create({ objective: 'o1', acceptance: 'a', projectId: release.project.record.id }, human))
+    expect(inRelease.task.record.projectId).toBe(release.project.record.id)
+    const moved = view(await service.mutate(inRelease.task.record.id, inRelease.task.record.revision, { operation: 'edit', projectId: research.project.record.id }, human))
+    expect(moved.record.projectId).toBe(research.project.record.id)
+    expect(service.list({ projectId: research.project.record.id })).toHaveLength(1)
+    expect(service.list({ projectId: release.project.record.id })).toHaveLength(0)
+
+    // A null edit clears the assignment; a missing project is refused loudly.
+    const cleared = view(await service.mutate(moved.record.id, moved.record.revision, { operation: 'edit', projectId: null }, human))
+    expect(cleared.record.projectId).toBeUndefined()
+    expect(await service.create({ objective: 'o2', acceptance: 'a', projectId: ProjectId('missing') }, human)).toMatchObject({ code: 'PROJECT_NOT_FOUND' })
+
+    // Archiving closes a project to new assignment but keeps its tasks readable.
+    const archived = await service.projectMutate(research.project.record.id, research.project.record.revision, { operation: 'project-archive' }, human)
+    if ('code' in archived) throw new Error(archived.code)
+    expect(archived.record.archived).toBe(true)
+    expect(await service.create({ objective: 'o3', acceptance: 'a', projectId: research.project.record.id }, human)).toMatchObject({ code: 'PROJECT_ARCHIVED' })
+    expect(service.project(research.project.record.id)?.record.archived).toBe(true)
+    expect(seenOps).toEqual(['project-create', 'project-create', 'project-archive'])
   })
 
   it('links subtasks with cross-record guards and aggregates children', async () => {

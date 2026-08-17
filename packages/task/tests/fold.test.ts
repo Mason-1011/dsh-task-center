@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { appendPackLine, applyMutation, foldTasks } from '../src/fold.ts'
-import { TaskId } from '../src/index.ts'
-import type { TaskActor, TaskDomainEvent, TaskMutation, TaskRecord } from '../src/types.ts'
+import { appendPackLine, applyMutation, applyProjectMutation, fold } from '../src/fold.ts'
+import { ProjectId, TaskId } from '../src/index.ts'
+import type { ProjectMutation, ProjectRecord, TaskActor, TaskDomainEvent, TaskMutation, TaskRecord } from '../src/types.ts'
 
 const packLimit = 1000
 const actorHuman: TaskActor = { kind: 'human' }
@@ -23,6 +23,18 @@ function apply(mutation: TaskMutation, record: TaskRecord | undefined, actor: Ta
   const result = applyMutation(record, mutation, { actor, at: '2026-08-14T00:00:00Z', packByteLimit: packLimit })
   if ('error' in result) throw new Error(result.error.code)
   return result.ok
+}
+
+function applyProject(mutation: ProjectMutation, record: ProjectRecord | undefined, actor: TaskActor = actorHuman): ProjectRecord {
+  const result = applyProjectMutation(record, mutation, { actor, at: '2026-08-14T00:00:00Z', packByteLimit: packLimit })
+  if ('error' in result) throw new Error(result.error.code)
+  return result.ok
+}
+
+/** Apply one project mutation expecting rejection, returning its code. */
+function projectError(mutation: ProjectMutation, record: ProjectRecord | undefined, actor: TaskActor = actorHuman): string {
+  const result = applyProjectMutation(record, mutation, { actor, at: '', packByteLimit: packLimit })
+  return 'error' in result ? result.error.code : `unexpected success: ${result.ok.revision}`
 }
 
 function created() {
@@ -198,7 +210,7 @@ describe('replay fold', () => {
     const events: TaskDomainEvent[] = []
     let revision = 0
     const emit = (mutation: TaskMutation, actor: TaskActor) => {
-      const record = apply(mutation, events.length === 0 ? undefined : foldTasks(events, packLimit).records.get(TaskId('t1'))!, actor)
+      const record = apply(mutation, events.length === 0 ? undefined : fold(events, packLimit).tasks.get(TaskId('t1'))!, actor)
       revision = record.revision
       events.push({
         eventId: `e${events.length}` as never,
@@ -209,12 +221,12 @@ describe('replay fold', () => {
     emit(create(), actorHuman)
     emit({ operation: 'claim' }, actorModel)
     emit({ operation: 'progress', note: 'step' }, actorModel)
-    const { records, archived } = foldTasks(events, packLimit)
-    expect(records.get(TaskId('t1'))?.status).toBe('active')
-    expect(records.get(TaskId('t1'))?.contextPack).toContain('step')
-    expect(archived.has(TaskId('t1'))).toBe(false)
+    const { tasks, archivedTasks } = fold(events, packLimit)
+    expect(tasks.get(TaskId('t1'))?.status).toBe('active')
+    expect(tasks.get(TaskId('t1'))?.contextPack).toContain('step')
+    expect(archivedTasks.has(TaskId('t1'))).toBe(false)
     emit({ operation: 'abandon' }, actorHuman)
-    expect(foldTasks(events, packLimit).archived.has(TaskId('t1'))).toBe(true)
+    expect(fold(events, packLimit).archivedTasks.has(TaskId('t1'))).toBe(true)
   })
 
   it('fails loud on a revision gap', () => {
@@ -223,6 +235,50 @@ describe('replay fold', () => {
       eventId: 'e1' as never, taskId: TaskId('t1'), revision: 3, actor: actorHuman, at: '',
       change: { kind: 'task/change', version: 1, operation: 'create', taskId: TaskId('t1'), revision: 3, mutation: create(), task: { record, blockedOverdue: false, archived: false } },
     }
-    expect(() => foldTasks([event], packLimit)).toThrow(/revision 3, expected 1/)
+    expect(() => fold([event], packLimit)).toThrow(/revision 3, expected 1/)
+  })
+
+  it('fails loud on a dangling project reference', () => {
+    const mutation = { operation: 'create' as const, taskId: TaskId('t1'), objective: 'o', acceptance: 'a', projectId: ProjectId('p-missing') }
+    const record = apply(mutation, undefined, actorHuman)
+    const event: TaskDomainEvent = {
+      eventId: 'e1' as never, taskId: TaskId('t1'), revision: 1, actor: actorHuman, at: '',
+      change: { kind: 'task/change', version: 1, operation: 'create', taskId: TaskId('t1'), revision: 1, mutation, task: { record, blockedOverdue: false, archived: false } },
+    }
+    expect(() => fold([event], packLimit)).toThrow(/missing project/)
+  })
+})
+
+describe('project mutations', () => {
+  const createProject = (): ProjectMutation => ({ operation: 'project-create', projectId: ProjectId('p1'), name: '发布' })
+
+  it('creates, renames, and archives with the archived flag', () => {
+    const created = applyProject(createProject(), undefined)
+    expect(created).toMatchObject({ revision: 1, name: '发布', archived: false })
+    const renamed = applyProject({ operation: 'project-rename', name: '季度发布' }, created)
+    expect(renamed).toMatchObject({ revision: 2, name: '季度发布', archived: false })
+    const archived = applyProject({ operation: 'project-archive' }, renamed)
+    expect(archived).toMatchObject({ revision: 3, archived: true })
+    // An archived project is closed: rename and archive both refuse.
+    expect(projectError({ operation: 'project-rename', name: 'x' }, archived)).toBe('PROJECT_ARCHIVED')
+    expect(projectError({ operation: 'project-archive' }, archived)).toBe('PROJECT_ARCHIVED')
+  })
+
+  it('keeps projects human-only and validates names', () => {
+    expect(projectError(createProject(), undefined, actorModel)).toBe('PROJECT_FORBIDDEN')
+    expect(projectError(createProject(), undefined, { kind: 'system' })).toBe('PROJECT_FORBIDDEN')
+    expect(projectError({ operation: 'project-create', projectId: ProjectId('p2'), name: '  ' }, undefined)).toBe('PROJECT_INVALID_NAME')
+    expect(projectError({ operation: 'project-rename', name: 'x' }, undefined)).toBe('PROJECT_NOT_FOUND')
+    expect(projectError(createProject(), applyProject(createProject(), undefined))).toBe('PROJECT_ALREADY_EXISTS')
+  })
+
+  it('carries a task project reference through create and edit', () => {
+    const project = applyProject(createProject(), undefined)
+    let record = apply({ operation: 'create', taskId: TaskId('t1'), objective: 'o', acceptance: 'a', projectId: project.id }, undefined, actorHuman)
+    expect(record.projectId).toBe(project.id)
+    // The fold carries edit reassignment without judging existence (the service commit does).
+    const moved = apply({ operation: 'edit', projectId: ProjectId('p-other') }, record, actorHuman)
+    expect(moved.projectId).toBe(ProjectId('p-other'))
+    expect(apply({ operation: 'edit', projectId: null }, moved, actorHuman).projectId).toBeUndefined()
   })
 })

@@ -52,7 +52,9 @@ describe('task-local durability', () => {
     roots.push(root)
 
     const first = await boot(root)
-    const created = await first.ctx.tasks.create({ objective: 'survive restart', acceptance: 'ledger restores' }, human)
+    const project = await first.ctx.tasks.projectCreate('重启项目', human)
+    if ('code' in project) throw new Error(project.code)
+    const created = await first.ctx.tasks.create({ objective: 'survive restart', acceptance: 'ledger restores', projectId: project.project.record.id }, human)
     if ('code' in created) throw new Error(created.code)
     const taskId = created.task.record.id
     const session = Session.create(sessionId)
@@ -69,6 +71,9 @@ describe('task-local durability', () => {
     const restored = second.ctx.tasks.get(taskId)
     if (restored === undefined) throw new Error('task did not survive the restart')
     expect(restored.record.objective).toBe('survive restart')
+    // The project event and the task's reference both round-trip the zod envelope.
+    expect(second.ctx.tasks.projects().map(p => p.record.name)).toEqual(['重启项目'])
+    expect(restored.record.projectId).toBe(project.project.record.id)
     expect(restored.record.status).toBe('active')
     expect(restored.record.holder).toBe(sessionId as never)
     expect(restored.record.contextPack).toContain('wrote through json')

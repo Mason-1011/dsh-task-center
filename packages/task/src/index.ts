@@ -9,11 +9,16 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { applyMutation, foldTasks } from './fold.ts'
+import { applyMutation, applyProjectMutation, fold } from './fold.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
-import { TaskId } from './types.ts'
+import { ProjectId, TaskId } from './types.ts'
 import type {
+  ProjectDomainEvent,
+  ProjectMutation,
+  ProjectOperation,
+  ProjectSnapshotChangeMeta,
+  ProjectView,
   TaskActor,
   TaskContextInjectedMeta,
   TaskError,
@@ -27,9 +32,9 @@ import type {
 } from './types.ts'
 
 export * from './types.ts'
-export { foldTasks, applyMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
+export { fold, applyMutation, applyProjectMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
 export { MemoryTaskStore } from './store.ts'
-export type { TaskStore, TaskEventInput } from './store.ts'
+export type { TaskStore, LedgerEventInput, LedgerEvent } from './store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -51,6 +56,12 @@ export interface TaskChanged {
   readonly task: TaskView
 }
 
+/** Live notification after one project event commits; projects share the ledger. */
+export interface ProjectChanged {
+  readonly operation: ProjectOperation
+  readonly project: ProjectView
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
@@ -61,6 +72,13 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'task/changed'(payload: TaskChanged): void
+    /**
+     * Project mutation committed to the shared ledger, right after its task twin.
+     * @param payload.operation - project verb that committed.
+     * @param payload.project - fresh view of the mutated project.
+     * @mode emit
+     */
+    'project/changed'(payload: ProjectChanged): void
   }
 }
 
@@ -83,8 +101,15 @@ export interface TaskHandle {
 export interface TaskListFilter {
   readonly status?: TaskStatus
   readonly workspaceId?: string
+  readonly projectId?: ProjectId
   readonly includeArchived?: boolean
   readonly limit?: number
+}
+
+/** Handle returned by `projectCreate`; disposing it archives the project. */
+export interface ProjectHandle {
+  readonly project: ProjectView
+  dispose(): Promise<void>
 }
 
 /** Wake rule that reached its target — consumed by task-wake (05 §4). */
@@ -122,33 +147,50 @@ export class TaskService extends Service {
 
   /** Read one task view. */
   get(taskId: TaskId): TaskView | undefined {
-    const { records, archived } = foldTasks(this.store.events(), this.config.contextPackByteLimit)
-    const record = records.get(taskId)
-    return record === undefined ? undefined : { record, blockedOverdue: false, archived: archived.has(taskId) }
+    const { tasks, archivedTasks } = fold(this.store.events(), this.config.contextPackByteLimit)
+    const record = tasks.get(taskId)
+    return record === undefined ? undefined : { record, blockedOverdue: false, archived: archivedTasks.has(taskId) }
   }
 
   /** List task views by filter. */
   list(filter: TaskListFilter = {}): TaskView[] {
-    const { records, archived } = foldTasks(this.store.events(), this.config.contextPackByteLimit)
+    const { tasks, archivedTasks } = fold(this.store.events(), this.config.contextPackByteLimit)
     const limit = filter.limit ?? this.config.listDefaultLimit
     const views: TaskView[] = []
-    for (const record of records.values()) {
-      if (archived.has(record.id) && filter.includeArchived !== true) continue
+    for (const record of tasks.values()) {
+      if (archivedTasks.has(record.id) && filter.includeArchived !== true) continue
       if (filter.status !== undefined && record.status !== filter.status) continue
       if (filter.workspaceId !== undefined && !record.workspaceIds.includes(filter.workspaceId)) continue
-      views.push({ record, blockedOverdue: false, archived: archived.has(record.id) })
+      if (filter.projectId !== undefined && record.projectId !== filter.projectId) continue
+      views.push({ record, blockedOverdue: false, archived: archivedTasks.has(record.id) })
       if (views.length >= limit) break
     }
     return views
+  }
+
+  /** All projects in creation order, archived included. */
+  projects(): readonly ProjectView[] {
+    const { projects } = fold(this.store.events(), this.config.contextPackByteLimit)
+    return [...projects.values()].map(record => ({ record }))
+  }
+
+  /** Read one project view. */
+  project(projectId: ProjectId): ProjectView | undefined {
+    return this.projects().find(view => view.record.id === projectId)
   }
 
   /**
    * Create one task. The handle's disposer abandons the task (legal only
    * before the first claim, which withdrawal enforces by error).
    */
-  async create(input: { objective: string; acceptance: string; workspaceIds?: readonly string[] }, actor: TaskActor): Promise<TaskHandle | TaskError> {
+  async create(input: { objective: string; acceptance: string; projectId?: ProjectId; workspaceIds?: readonly string[] }, actor: TaskActor): Promise<TaskHandle | TaskError> {
     const taskId = TaskId(randomUUID())
-    const view = await this.commit(taskId, { operation: 'create', taskId, objective: input.objective, acceptance: input.acceptance, workspaceIds: input.workspaceIds }, actor)
+    const view = await this.commit(taskId, {
+      operation: 'create', taskId,
+      objective: input.objective, acceptance: input.acceptance,
+      ...input.projectId === undefined ? {} : { projectId: input.projectId },
+      ...input.workspaceIds === undefined ? {} : { workspaceIds: input.workspaceIds },
+    }, actor)
     if ('code' in view) return view
     const claimed = view.record.revision
     return {
@@ -158,6 +200,32 @@ export class TaskService extends Service {
         void withdrawn; void claimed
       },
     }
+  }
+
+  /**
+   * Create one project (human-managed grouping). The handle's disposer archives it.
+   */
+  async projectCreate(name: string, actor: TaskActor): Promise<ProjectHandle | TaskError> {
+    const projectId = ProjectId(randomUUID())
+    const view = await this.commitProject(projectId, { operation: 'project-create', projectId, name }, actor)
+    if ('code' in view) return view
+    return {
+      project: view,
+      dispose: async () => {
+        const withdrawn = await this.commitProject(projectId, { operation: 'project-archive' }, { kind: 'human' })
+        void withdrawn
+      },
+    }
+  }
+
+  /** Single entry point for project transitions; compare-and-set on revision. */
+  async projectMutate(projectId: ProjectId, expectedRevision: number, mutation: Exclude<ProjectMutation, { operation: 'project-create' }>, actor: TaskActor): Promise<ProjectView | TaskError> {
+    const current = this.project(projectId)
+    if (current === undefined) return { code: 'PROJECT_NOT_FOUND', message: 'project does not exist' }
+    if (current.record.revision !== expectedRevision) {
+      return { code: 'TASK_STALE_REVISION', message: `expected revision ${current.record.revision}` }
+    }
+    return this.commitProject(projectId, mutation, actor)
   }
 
   /** Register `session` as the holder; appends the session to `sessionIds`. */
@@ -252,19 +320,26 @@ export class TaskService extends Service {
   /** Validate, append to the domain ledger, emit, and write the session receipt. */
   private async commit(taskId: TaskId, mutation: TaskMutation, actor: TaskActor, session?: Session): Promise<TaskView | TaskError> {
     const at = new Date().toISOString()
-    const { records, archived } = foldTasks(this.store.events(), this.config.contextPackByteLimit)
+    const ledger = fold(this.store.events(), this.config.contextPackByteLimit)
     if (mutation.operation === 'subtask-add') {
-      const rejected = this.checkLink(records, taskId, mutation.childId)
+      const rejected = this.checkLink(ledger.tasks, taskId, mutation.childId)
       if (rejected !== undefined) return rejected
     }
-    const result = applyMutation(records.get(taskId), mutation, {
+    if (mutation.operation === 'create' || mutation.operation === 'edit') {
+      const target = mutation.projectId ?? undefined
+      if (target !== undefined) {
+        const rejected = this.checkProject(ledger, target)
+        if (rejected !== undefined) return rejected
+      }
+    }
+    const result = applyMutation(ledger.tasks.get(taskId), mutation, {
       actor, at, packByteLimit: this.config.contextPackByteLimit,
     })
     if ('error' in result) return result.error
     // The fold above reflects the stream before this append, so 'abandon' flips the flag here.
     const view: TaskView = {
       record: result.ok, blockedOverdue: false,
-      archived: archived.has(taskId) || mutation.operation === 'abandon',
+      archived: ledger.archivedTasks.has(taskId) || mutation.operation === 'abandon',
     }
     const change: TaskSnapshotChangeMeta = {
       kind: 'task/change', version: 1,
@@ -274,5 +349,37 @@ export class TaskService extends Service {
     this.ctx.emit('task/changed', { operation: mutation.operation, task: view })
     if (actor.kind === 'model' && session !== undefined) session.append('task/change', change)
     return view
+  }
+
+  /** Validate and append one project event to the shared ledger, then emit. */
+  private async commitProject(projectId: ProjectId, mutation: ProjectMutation, actor: TaskActor): Promise<ProjectView | TaskError> {
+    const at = new Date().toISOString()
+    const { projects } = fold(this.store.events(), this.config.contextPackByteLimit)
+    const result = applyProjectMutation(projects.get(projectId), mutation, {
+      actor, at, packByteLimit: this.config.contextPackByteLimit,
+    })
+    if ('error' in result) return result.error
+    const view: ProjectView = { record: result.ok }
+    const change: ProjectSnapshotChangeMeta = {
+      kind: 'project/change', version: 1,
+      operation: mutation.operation, projectId, revision: result.ok.revision, mutation, project: view,
+    }
+    const event: Omit<ProjectDomainEvent, 'eventId'> = { projectId, revision: result.ok.revision, actor, at, change }
+    await this.store.append(event)
+    this.ctx.emit('project/changed', { operation: mutation.operation, project: view })
+    return view
+  }
+
+  /**
+   * Cross-record guard for a task's project reference: the project must exist
+   * and be live. Archiving a project keeps its existing tasks readable (they
+   * still fold), but no task may be newly assigned to it.
+   */
+  private checkProject(ledger: ReturnType<typeof fold>, projectId: ProjectId | undefined): TaskError | undefined {
+    if (projectId === undefined) return undefined
+    const project = ledger.projects.get(projectId)
+    if (project === undefined) return { code: 'PROJECT_NOT_FOUND', message: 'project does not exist' }
+    if (project.archived) return { code: 'PROJECT_ARCHIVED', message: 'project is archived; reassign its tasks or create a new project' }
+    return undefined
   }
 }

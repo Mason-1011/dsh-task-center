@@ -11,7 +11,7 @@ import type {} from '@deepseek-ai/dsh-storage-domain'
 import { DomainTaskStore } from './store.ts'
 import { taskDomainSpec } from './spec.ts'
 
-export { taskDomainSpec, storedTaskEvent } from './spec.ts'
+export { taskDomainSpec, storedLedgerEvent } from './spec.ts'
 export { DomainTaskStore } from './store.ts'
 
 /** Cordis plugin name. */

@@ -37,6 +37,18 @@ export function TaskEventId(id: string): TaskEventId {
 /** Task lifecycle states. Archived tasks keep their status and move to the domain-global archive set. */
 export type TaskStatus = 'todo' | 'active' | 'blocked' | 'review' | 'done'
 
+/** Stable project identity, unique within the task domain ledger. */
+export type ProjectId = Branded<'ProjectId'>
+
+/**
+ * Brand a string as a {@link ProjectId}.
+ * @param id - the raw project id string.
+ * @returns the same string, branded (a compile-time cast — no runtime cost).
+ */
+export function ProjectId(id: string): ProjectId {
+  return id as ProjectId
+}
+
 /** State-changing verbs. Closed union; see the transition table in fold.ts. */
 export type TaskOperation =
   | 'create'
@@ -68,8 +80,8 @@ export type WakeRule =
 
 /** One mutation request. Discriminated union over the operation verbs. */
 export type TaskMutation =
-  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly workspaceIds?: readonly string[] }
-  | { readonly operation: 'edit'; readonly objective?: string; readonly acceptance?: string }
+  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspaceIds?: readonly string[] }
+  | { readonly operation: 'edit'; readonly objective?: string; readonly acceptance?: string; readonly projectId?: ProjectId | null }
   | { readonly operation: 'claim' }
   | { readonly operation: 'progress'; readonly note: string; readonly next?: string }
   | { readonly operation: 'block'; readonly reason: TaskReason }
@@ -94,6 +106,8 @@ export interface TaskRecord {
   /** The live claiming session; absent while unclaimed, done, or abandoned. */
   readonly holder?: SessionId
   readonly workspaceIds: readonly string[]
+  /** The project this task belongs to; absent while unassigned. */
+  readonly projectId?: ProjectId
   readonly sessionIds: readonly SessionId[]
   readonly contextPack: string
   readonly wakeRule?: WakeRule
@@ -148,6 +162,51 @@ export interface TaskDomainEvent {
   readonly change: TaskSnapshotChangeMeta
 }
 
+/** State-changing project verbs. Closed union; projects carry no status machine. */
+export type ProjectOperation = 'project-create' | 'project-rename' | 'project-archive'
+
+/** One project mutation request. */
+export type ProjectMutation =
+  | { readonly operation: 'project-create'; readonly projectId: ProjectId; readonly name: string }
+  | { readonly operation: 'project-rename'; readonly name: string }
+  | { readonly operation: 'project-archive' }
+
+/** Durable project state, derived by folding the same domain event stream. */
+export interface ProjectRecord {
+  readonly id: ProjectId
+  readonly revision: number
+  readonly name: string
+  readonly archived: boolean
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/** Read-only project projection served by `ctx.tasks`. */
+export interface ProjectView {
+  readonly record: ProjectRecord
+}
+
+/** Snapshot-style receipt for one committed project change (the live twin of the domain event). */
+export interface ProjectSnapshotChangeMeta {
+  readonly kind: 'project/change'
+  readonly version: 1
+  readonly operation: ProjectOperation
+  readonly projectId: ProjectId
+  readonly revision: number
+  readonly mutation: ProjectMutation
+  readonly project: ProjectView
+}
+
+/** Authoritative project-domain event; shares the ledger and stream with tasks. */
+export interface ProjectDomainEvent {
+  readonly eventId: TaskEventId
+  readonly projectId: ProjectId
+  readonly revision: number
+  readonly actor: TaskActor
+  readonly at: string
+  readonly change: ProjectSnapshotChangeMeta
+}
+
 /** Stable error codes for rejected task reads and mutations (05 §1). */
 export type TaskErrorCode =
   | 'TASK_NOT_FOUND'
@@ -166,6 +225,11 @@ export type TaskErrorCode =
   | 'TASK_SUBTASK_NOT_CHILD'
   | 'TASK_WAKE_INVALID_RULE'
   | 'TASK_INVALID_FILTER'
+  | 'PROJECT_NOT_FOUND'
+  | 'PROJECT_ALREADY_EXISTS'
+  | 'PROJECT_INVALID_NAME'
+  | 'PROJECT_FORBIDDEN'
+  | 'PROJECT_ARCHIVED'
 
 /** Task service error carrying one stable code. */
 export interface TaskError {

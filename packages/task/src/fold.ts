@@ -7,6 +7,10 @@
  */
 
 import type {
+  ProjectDomainEvent,
+  ProjectId,
+  ProjectMutation,
+  ProjectRecord,
   TaskDomainEvent,
   TaskError,
   TaskId,
@@ -117,6 +121,8 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     if (mutation.operation !== 'create') return error('TASK_NOT_FOUND', 'task does not exist')
     if (mutation.objective.trim() === '') return error('TASK_INVALID_OBJECTIVE', 'objective must not be empty')
     if (mutation.acceptance.trim() === '') return error('TASK_INVALID_ACCEPTANCE', 'acceptance must not be empty')
+    // The project reference is validated against the same fold at the service
+    // commit layer; here it is carried, and `fold` rejects a dangling final state.
     return { ok: {
       id: mutation.taskId,
       revision: 1,
@@ -124,6 +130,7 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       acceptance: mutation.acceptance,
       status: 'todo',
       workspaceIds: [...mutation.workspaceIds ?? []],
+      ...mutation.projectId === undefined ? {} : { projectId: mutation.projectId },
       sessionIds: [],
       contextPack: '',
       subtasks: [],
@@ -214,6 +221,11 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
         if (mutation.acceptance.trim() === '') return error('TASK_INVALID_ACCEPTANCE', 'acceptance must not be empty')
         next.acceptance = mutation.acceptance
       }
+      // A present key reassigns (the service validates the target); null clears.
+      if ('projectId' in mutation) {
+        if (mutation.projectId === null) delete next.projectId
+        else next.projectId = mutation.projectId
+      }
       break
     }
     case 'wake-set': {
@@ -254,41 +266,100 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
   return { ok: next }
 }
 
-/** Replay fold outcome. */
-export interface FoldedTasks {
-  readonly records: ReadonlyMap<TaskId, TaskRecord>
-  readonly archived: ReadonlySet<TaskId>
+/** Replay fold outcome: both entity families of the ledger. */
+export interface FoldedLedger {
+  readonly tasks: ReadonlyMap<TaskId, TaskRecord>
+  readonly projects: ReadonlyMap<ProjectId, ProjectRecord>
+  readonly archivedTasks: ReadonlySet<TaskId>
+}
+
+/** Guard verdict for project mutations, mirroring {@link TransitionResult}. */
+export type ProjectResult = { readonly ok: ProjectRecord } | { readonly error: TaskError }
+
+/**
+ * Apply one project mutation (undefined for `project-create`). Projects are
+ * human-managed grouping metadata: every verb refuses mechanical and model
+ * actors, and there is no status machine — only the archived flag.
+ */
+export function applyProjectMutation(record: ProjectRecord | undefined, mutation: ProjectMutation, context: ApplyContext): ProjectResult {
+  if (context.actor.kind !== 'human') {
+    return error('PROJECT_FORBIDDEN', 'projects are created, renamed, and archived by humans only')
+  }
+  if (record === undefined) {
+    if (mutation.operation !== 'project-create') return error('PROJECT_NOT_FOUND', 'project does not exist')
+    if (mutation.name.trim() === '') return error('PROJECT_INVALID_NAME', 'project name must not be empty')
+    return { ok: {
+      id: mutation.projectId,
+      revision: 1,
+      name: mutation.name,
+      archived: false,
+      createdAt: context.at,
+      updatedAt: context.at,
+    } }
+  }
+  if (record.archived) return error('PROJECT_ARCHIVED', 'project is archived')
+  if (mutation.operation === 'project-rename') {
+    if (mutation.name.trim() === '') return error('PROJECT_INVALID_NAME', 'project name must not be empty')
+    return { ok: { ...record, revision: record.revision + 1, name: mutation.name, updatedAt: context.at } }
+  }
+  if (mutation.operation === 'project-archive') {
+    return { ok: { ...record, revision: record.revision + 1, archived: true, updatedAt: context.at } }
+  }
+  return error('PROJECT_ALREADY_EXISTS', 'a project with this id already exists')
 }
 
 /**
- * Fold the authoritative domain event stream. Fails loud on a corrupt stream:
- * a revision gap, an unknown-task mutation, or a transition the table rejects.
- * This is the invariant basis — `TaskRecord` equals this fold over the stream.
+ * Fold the authoritative domain event stream — tasks and projects share one
+ * ledger. Fails loud on a corrupt stream: a revision gap, an unknown-entity
+ * mutation, a transition the table rejects, or a task referencing a project
+ * the stream never created. This is the invariant basis — both record families
+ * equal this fold over the stream.
  */
-export function foldTasks(events: readonly TaskDomainEvent[], packByteLimit: number): FoldedTasks {
-  const records = new Map<TaskId, TaskRecord>()
-  const archived = new Set<TaskId>()
-  const lastRevision = new Map<TaskId, number>()
+export function fold(events: readonly (TaskDomainEvent | ProjectDomainEvent)[], packByteLimit: number): FoldedLedger {
+  const tasks = new Map<TaskId, TaskRecord>()
+  const projects = new Map<ProjectId, ProjectRecord>()
+  const archivedTasks = new Set<TaskId>()
+  const lastRevision = new Map<TaskId | ProjectId, number>()
   for (const event of events) {
-    const record = records.get(event.taskId)
-    const expected = (lastRevision.get(event.taskId) ?? 0) + 1
+    const change = event.change
+    const id = change.kind === 'task/change' ? change.taskId : change.projectId
+    const expected = (lastRevision.get(id) ?? 0) + 1
     if (event.revision !== expected) {
-      throw new Error(`corrupt task stream: ${event.taskId} revision ${event.revision}, expected ${expected}`)
+      throw new Error(`corrupt ledger: ${id} revision ${event.revision}, expected ${expected}`)
     }
-    const result = applyMutation(record, event.change.mutation, {
-      actor: event.actor,
-      at: event.at,
-      packByteLimit,
-    })
-    if ('error' in result) {
-      throw new Error(`corrupt task stream: ${event.taskId} revision ${event.revision}: ${result.error.code}`)
+    if (change.kind === 'task/change') {
+      const result = applyMutation(tasks.get(change.taskId), change.mutation, {
+        actor: event.actor, at: event.at, packByteLimit,
+      })
+      if ('error' in result) {
+        throw new Error(`corrupt ledger: ${change.taskId} revision ${event.revision}: ${result.error.code}`)
+      }
+      if (result.ok.revision !== event.revision || result.ok.status !== change.task.record.status) {
+        throw new Error(`corrupt ledger: ${change.taskId} revision ${event.revision} disagrees with its view`)
+      }
+      tasks.set(change.taskId, result.ok)
+      if (change.operation === 'abandon') archivedTasks.add(change.taskId)
+    } else {
+      const result = applyProjectMutation(projects.get(change.projectId), change.mutation, {
+        actor: event.actor, at: event.at, packByteLimit,
+      })
+      if ('error' in result) {
+        throw new Error(`corrupt ledger: ${change.projectId} revision ${event.revision}: ${result.error.code}`)
+      }
+      const ok = result.ok
+      if (ok.revision !== event.revision || ok.name !== change.project.record.name || ok.archived !== change.project.record.archived) {
+        throw new Error(`corrupt ledger: ${change.projectId} revision ${event.revision} disagrees with its view`)
+      }
+      projects.set(change.projectId, ok)
     }
-    if (result.ok.revision !== event.revision || result.ok.status !== event.change.task.record.status) {
-      throw new Error(`corrupt task stream: ${event.taskId} revision ${event.revision} disagrees with its view`)
-    }
-    records.set(event.taskId, result.ok)
-    lastRevision.set(event.taskId, event.revision)
-    if (event.change.operation === 'abandon') archived.add(event.taskId)
+    lastRevision.set(id, event.revision)
   }
-  return { records, archived }
+  // Referential integrity: the commit layer refuses dangling project refs, so
+  // a stream that still ends with one is corrupt.
+  for (const task of tasks.values()) {
+    if (task.projectId !== undefined && !projects.has(task.projectId)) {
+      throw new Error(`corrupt ledger: ${task.id} references missing project ${task.projectId}`)
+    }
+  }
+  return { tasks, projects, archivedTasks }
 }

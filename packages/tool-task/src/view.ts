@@ -35,6 +35,7 @@ export type TaskToolErrorCode =
   | 'invalid_filter'
   | 'invalid_transition'
   | 'invalid_subtask'
+  | 'invalid_project'
   | 'forbidden'
   | 'internal_error'
 
@@ -68,6 +69,11 @@ const TOOL_CODES: Readonly<Record<TaskErrorCode, TaskToolErrorCode>> = {
   TASK_SUBTASK_CYCLE: 'invalid_subtask',
   TASK_SUBTASK_DUPLICATE: 'invalid_subtask',
   TASK_SUBTASK_NOT_CHILD: 'invalid_subtask',
+  PROJECT_NOT_FOUND: 'not_found',
+  PROJECT_ALREADY_EXISTS: 'invalid_project',
+  PROJECT_INVALID_NAME: 'invalid_project',
+  PROJECT_FORBIDDEN: 'forbidden',
+  PROJECT_ARCHIVED: 'invalid_project',
 }
 
 /** Translate one seam error into the closed tool union. */
@@ -148,6 +154,7 @@ const ERROR_SCHEMAS = [
   errorSchema('invalid_filter'),
   errorSchema('invalid_transition'),
   errorSchema('invalid_subtask'),
+  errorSchema('invalid_project'),
   errorSchema('forbidden'),
   errorSchema('internal_error'),
 ] as const
