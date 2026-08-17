@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.js"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

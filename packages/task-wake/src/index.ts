@@ -18,6 +18,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: carries the Context.agentLoop augmentation into src-only builds
+// (the emit path cannot lean on test files importing the module).
+import type AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { createUserMessage, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
