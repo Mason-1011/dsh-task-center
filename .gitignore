@@ -3,3 +3,6 @@ lib/
 *.tsbuildinfo
 .DS_Store
 .env
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
