@@ -1,9 +1,10 @@
 /**
  * Bundle smoke test: the built client (dist/client.js) hands itself to the
  * dsh ModuleLoader under the package id, its factory runs with only the
- * react-family platform seeds on require, and its cordis plugin applies into
- * exactly two slot registrations (sidebar footer button + shell overlay) with
- * function components and a connection face.
+ * platform seeds on require (react family + the official UI primitives), and
+ * its cordis plugin applies into exactly two slot registrations (sidebar
+ * footer button + shell overlay) with function components and a connection
+ * face.
  * @module @task-center/task-web/tests/client
  */
 
@@ -30,9 +31,9 @@ async function loadBundle(): Promise<{ code: string; handoff: Handoff }> {
   return { code, handoff: loads[0]! }
 }
 
-/** A require that answers only the react-family seeds, as the loader would. */
+/** A require that answers only the platform seeds, as the loader would. */
 function seedRequire(spec: string): unknown {
-  if (spec === 'react' || spec === 'react/jsx-runtime') {
+  if (spec === 'react' || spec === 'react/jsx-runtime' || spec === '@deepseek-ai/dsh-client-ui-primitives') {
     return new Proxy({}, { get: () => () => null })
   }
   throw new Error(`bundle required a non-seed module: ${spec}`)
@@ -43,12 +44,16 @@ describe('task-web client bundle', () => {
     const { code, handoff } = await loadBundle()
     expect(code.startsWith('window.__ModuleLoader__.load({')).toBe(true)
     expect(handoff.id).toBe('@task-center/task-web')
-    // Nothing outside the react family is ever required.
+    // Only platform seeds are required; the official UI primitives must come
+    // from the shell's seed (the npm copy is unstyled — bundling it is a bug).
     const specs = new Set([...code.matchAll(/require\((["'])(.+?)\1\)/g)].map(match => match[2]))
-    expect([...specs]).toEqual(expect.arrayContaining(['react']))
+    expect([...specs]).toContain('@deepseek-ai/dsh-client-ui-primitives')
     for (const spec of specs) {
-      expect(spec === 'react' || spec === 'react/jsx-runtime', `unexpected require ${spec}`).toBe(true)
+      const known = spec === 'react' || spec === 'react/jsx-runtime' || spec === '@deepseek-ai/dsh-client-ui-primitives'
+      expect(known, `unexpected require ${spec}`).toBe(true)
     }
+    // Token-only styling: the pre-redesign hardcoded dark palette must stay dead.
+    expect(code).not.toMatch(/#10141c|#161d29|#242c3a|#1a2230|#0d1118|#151b26/)
   })
 
   it('exports a slots+connection plugin applying into both surfaces', async () => {

@@ -29,12 +29,14 @@ export interface BoardState {
   readonly fetchedAt: string | undefined
   /** Ephemeral action feedback (CAS-stale notice, action errors). */
   readonly notice: string | undefined
+  /** Bumped on every notice so an identical repeated message remounts the Toast. */
+  readonly noticeSeq: number
 }
 
 type Listener = () => void
 
 let state: BoardState = {
-  open: false, loading: false, payload: undefined, error: undefined, fetchedAt: undefined, notice: undefined,
+  open: false, loading: false, payload: undefined, error: undefined, fetchedAt: undefined, notice: undefined, noticeSeq: 0,
 }
 const listeners = new Set<Listener>()
 let pollTimer: ReturnType<typeof setInterval> | undefined
@@ -108,8 +110,8 @@ export const boardStore = {
     const result = await callApi<ActResult>(connection, 'act', { taskId, expectedRevision, action, reason })
     if (result.ok === false) {
       setState(result.code === 'TASK_STALE_REVISION'
-        ? { notice: '任务已被他人变更,看板已刷新' }
-        : { notice: `${result.code}: ${result.message}` })
+        ? { notice: '任务已被他人变更,看板已刷新', noticeSeq: state.noticeSeq + 1 }
+        : { notice: `${result.code}: ${result.message}`, noticeSeq: state.noticeSeq + 1 })
     } else {
       setState({ notice: undefined })
     }
@@ -127,6 +129,8 @@ export const boardStore = {
   /** Detail fetch for one card (no cache — opened rarely, freshness wins). */
   show: (connection: ConnectionService, taskId: string): Promise<ShowResult> =>
     callApi<ShowResult>(connection, 'show', { taskId }),
+  /** Dismiss the ephemeral notice (the Toast's onDone). */
+  clearNotice: (): void => { setState({ notice: undefined }) },
 }
 
 /** React binding over the store. */

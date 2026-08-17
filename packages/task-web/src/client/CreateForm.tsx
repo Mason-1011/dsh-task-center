@@ -1,10 +1,13 @@
 /**
- * New-task form: objective + acceptance + project dropdown (无项目 default).
- * Domain rejections (empty fields, archived project) render inline.
+ * New-task form over the official Modal and Input: objective + acceptance +
+ * project dropdown (无项目 default; native select in the Input idiom — the
+ * primitives ship no Select). Domain rejections (empty fields, archived
+ * project) render inline.
  * @module @task-center/task-web/client/CreateForm
  */
 
 import { useState } from 'react'
+import { Button, IconChevronDownOutline14, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CreateResult, ProjectChip } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 import { boardStore } from './store.ts'
@@ -38,36 +41,46 @@ export function CreateForm(props: { connection: ConnectionService; projects: rea
   }
 
   return (
-    <div className="task-web-modal-backdrop" onClick={props.onDone}>
-      <div className="task-web-modal" onClick={event => event.stopPropagation()}>
-        <div className="task-web-modal-title">新建任务</div>
-        <div className="task-web-form">
-          <div className="task-web-field">
-            <span className="task-web-field-label">目标</span>
-            <input
-              className="task-web-input"
-              autoFocus
-              value={objective}
-              onChange={event => setObjective(event.target.value)}
-              placeholder="要做成什么"
-            />
-          </div>
-          <div className="task-web-field">
-            <span className="task-web-field-label">验收</span>
-            <input
-              className="task-web-input"
-              value={acceptance}
-              onChange={event => setAcceptance(event.target.value)}
-              placeholder="怎么算完成"
-            />
-          </div>
-          <div className="task-web-field">
-            <span className="task-web-field-label">项目</span>
-            <select
-              className="task-web-input"
-              value={projectId}
-              onChange={event => setProjectId(event.target.value)}
-            >
+    <Modal
+      open
+      onClose={props.onDone}
+      title="新建任务"
+      closeLabel="关闭"
+      footer={(
+        <>
+          <Button variant="outline" onClick={props.onDone}>取消</Button>
+          <Button
+            variant="primary"
+            disabled={busy || objective.trim() === '' || acceptance.trim() === ''}
+            onClick={() => { void submit() }}
+          >
+            创建
+          </Button>
+        </>
+      )}
+    >
+      <div className="task-web-detail">
+        <div className="task-web-field">
+          <span className="task-web-field-label">目标</span>
+          <Input
+            autoFocus
+            value={objective}
+            onChange={event => setObjective(event.target.value)}
+            placeholder="要做成什么"
+          />
+        </div>
+        <div className="task-web-field">
+          <span className="task-web-field-label">验收</span>
+          <Input
+            value={acceptance}
+            onChange={event => setAcceptance(event.target.value)}
+            placeholder="怎么算完成"
+          />
+        </div>
+        <div className="task-web-field">
+          <span className="task-web-field-label">项目</span>
+          <span className="task-web-select-wrap">
+            <select value={projectId} onChange={event => setProjectId(event.target.value)}>
               <option value="">无项目</option>
               {props.projects.map(project => (
                 <option key={project.id} value={project.id}>
@@ -75,22 +88,11 @@ export function CreateForm(props: { connection: ConnectionService; projects: rea
                 </option>
               ))}
             </select>
-          </div>
-          {error !== undefined && <div className="task-web-error">{error}</div>}
-          <div className="task-web-form-actions">
-            <button type="button" className="task-web-btn" data-variant="ghost" onClick={props.onDone}>取消</button>
-            <button
-              type="button"
-              className="task-web-btn"
-              data-variant="primary"
-              disabled={busy || objective.trim() === '' || acceptance.trim() === ''}
-              onClick={() => { void submit() }}
-            >
-              创建
-            </button>
-          </div>
+            <IconChevronDownOutline14 size={14} />
+          </span>
         </div>
+        {error !== undefined && <div className="task-web-error">{error}</div>}
       </div>
-    </div>
+    </Modal>
   )
 }

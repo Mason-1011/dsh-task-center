@@ -3,10 +3,12 @@
  *
  * esbuild bundles src/client into one classic script wrapped in the dsh
  * ModuleLoader envelope: `window.__ModuleLoader__.load({ id, factory })`. The
- * factory closes over its `require` parameter, so externals (react family —
- * platform seeds) resolve to the loader's shared instances instead of fresh
- * globals; that is why this is NOT an iife. The trailing guard fails the build
- * if the bundle ever requires anything outside the seed list.
+ * factory closes over its `require` parameter, so externals (platform seeds:
+ * the react family and the official UI primitives) resolve to the loader's
+ * shared instances instead of fresh globals; that is why this is NOT an iife.
+ * The primitives seed is types-only here — the npm copy's CSS is stubbed, so
+ * bundling it would render naked components. The trailing guard fails the
+ * build if the bundle ever requires anything outside the seed list.
  */
 import { build } from 'esbuild'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -14,7 +16,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const SEEDS = new Set(['react', 'react/jsx-runtime'])
+const SEEDS = new Set(['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives'])
 
 const result = await build({
   entryPoints: [resolve(root, 'src/client/index.tsx')],

@@ -9,12 +9,15 @@
 import { BoardButton, BoardOverlay } from './Board.tsx'
 import type { ClientContext } from './context.ts'
 import { boardStore } from './store.ts'
+import { ensureStyles } from './styles.ts'
 
 /** The client-side services this bundle consumes. */
 export const inject = ['slots', 'connection']
 
 /** Register both board surfaces and prime the footer button's staleness dot. */
 export function apply(ctx: ClientContext): void {
+  // The entry button needs its styles from the first paint, not first click.
+  ensureStyles()
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'task-web-board',
