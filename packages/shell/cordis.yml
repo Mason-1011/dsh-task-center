@@ -1,0 +1,80 @@
+# 指挥中心完整组合:模型脊柱 + 存储 + 任务接缝全家(含常驻的唤醒/额度/回收)+ 交互 shell。
+# 一切插件都经 Loader 真加载(REAL composition);裸名从本目录 node_modules 解析,
+# 因此本包 package.json 必须声明这里出现的每一个名字(解析清单)。
+# 数据根目录与模型路由由环境注入:TASK_CENTER_ROOT、TASK_CENTER_MODEL、DEEPSEEK_API_KEY。
+
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: !!js process.env.TASK_CENTER_ROOT ?? './.task-center'
+
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+    routes: {}
+
+- id: tasks
+  name: '@task-center/task'
+  config:
+    contextPackByteLimit: 2000
+    listDefaultLimit: 20
+
+- id: task-local
+  name: '@task-center/task-local'
+
+- id: tool-task
+  name: '@task-center/tool-task'
+
+- id: command-task
+  name: '@task-center/command-task'
+
+- id: task-wake
+  name: '@task-center/task-wake'
+  config:
+    pollSeconds: 30
+    agent:
+      provider: deepseek-official
+      model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
+
+- id: task-quota
+  name: '@task-center/task-quota'
+
+- id: task-reaper
+  name: '@task-center/task-reaper'
+
+- id: shell
+  name: '@task-center/shell'
+  config:
+    agent:
+      provider: deepseek-official
+      model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'

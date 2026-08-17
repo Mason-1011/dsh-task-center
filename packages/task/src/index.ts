@@ -383,3 +383,5 @@ export class TaskService extends Service {
     return undefined
   }
 }
+
+export default TaskService

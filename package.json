@@ -6,8 +6,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc -p packages/task && tsc -p packages/task-local && tsc -p packages/tool-task && tsc -p packages/command-task && tsc -p packages/task-wake && tsc -p packages/task-quota && tsc -p packages/task-reaper",
-    "test": "vitest run"
+    "typecheck": "tsc -p packages/task && tsc -p packages/task-local && tsc -p packages/tool-task && tsc -p packages/command-task && tsc -p packages/task-wake && tsc -p packages/task-quota && tsc -p packages/task-reaper && tsc -p packages/shell",
+    "test": "vitest run",
+    "start": "node --experimental-transform-types packages/shell/src/bin.ts"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

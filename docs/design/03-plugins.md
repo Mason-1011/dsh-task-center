@@ -9,6 +9,9 @@
 | `task/tool-task` | Consumer(模型) | `task_create(可带父/项目) / task_claim / task_update / task_report / task_query(可按父查子/按项目收窄) / task_projects` 六工具 + 提示词段 |
 | `task/command-task` + `client/ui-task` | Consumer(人类) | `/task` 命令(面板按项目两级分组)+ `/task project` 建改归档;Web 面板(全景/过滤/阻塞置顶/待验收队列/跳转会话) |
 | `task/task-wake` | Provider(时间) | 宿主级定时器,见 §2 |
+| `task/task-quota` | Provider(额度) | 观察 `llm/stream` 会话失败,QUOTA 即挂起并释放持有;重置点经 task-wake 唤醒续做 |
+| `task/task-reaper` | Provider(存活) | 会话处置事件 + 挂载清扫,system actor 释放死持有(崩溃恢复) |
+| `task/shell` | Consumer(人类·壳) | 一条命令经真实 Loader 组装全部插件(cordis.yml)+ 交互 REPL;斜杠行走命令注册表,普通行进交互会话 |
 
 ## 2. 修正:定时干活不能复用 schedule
 
@@ -36,5 +39,5 @@ task-wake(到点) ──▶ agents.create ──▶ tool-task 认领 ──▶ �
 
 - `task/task`、`task-wake`:Service 定义件(形态 1);
 - `task-local`:函数插件,inject `['storageDomain','tasks']`,注册进域(形态 3);
-- `tool-task`、`command-task`:消费型函数插件(形态 4);
+- `tool-task`、`command-task`、`task-quota`、`task-reaper`、`shell`:消费型函数插件(形态 4);
 - `ui-task`:浏览器侧插件,经 Typert RPC 读宿主服务。

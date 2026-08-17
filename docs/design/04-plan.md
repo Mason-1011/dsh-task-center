@@ -35,7 +35,7 @@
 
 | # | 片 | 对应痛点 | 验收 |
 |---|---|---|---|
-| 1 | **壳**:一条命令启动指挥中心(cordis.yml 经 Loader 的 REAL-composition + 交互 REPL + 常驻 wake/reaper/quota) | 全部前置 | 你本机一条命令进入可打字会话,`/task` 可用;keyless 冒烟快照 |
+| 1 | **壳**:一条命令启动指挥中心(cordis.yml 经 Loader 的 REAL-composition + 交互 REPL + 常驻 wake/reaper/quota)——✅ 2026-08-17 | 全部前置 | 你本机一条命令进入可打字会话,`/task` 可用;keyless 冒烟快照(PTY 冒烟 + composition/repl 双测试经真实 Loader) |
 | 2 | **搁置可见性**:面板显示项目/任务闲置天数,最久搁置置顶标 ⚠ | 2 | 面板测试 + 快照 |
 | 3 | **巡检例行**:复用 wake 的每日盘点会话,刷新各搁置项目"现状/下一步/卡点" | 2 | 无 key 闭环(假适配器)+ 真模型一次 |
 | 4 | **全速推进 `/task push`**:激活全部非阻塞待办并行干活,并发上限可配;撞墙由现有 quota 挂起+重置唤醒接管 | 3 | 并发守卫测试 + 真 key 小 e2e |
@@ -50,7 +50,7 @@ backlog(不排期):任务间依赖动词(迁移交错场景)、webui 适配、�
 - [ ] 注册即副作用:工具/命令/事件监听全部返回 disposer
 - [ ] contextPack 字节上限作用于完整值(bounds to the complete result)
 - [ ] 状态只在提交点发布:转写先落域事件、后发通知
-- [ ] REAL-composition 测试:过 Loader 启测试 cordis.yml,不手拼 `ctx.plugin`
+- [x] REAL-composition 测试:过 Loader 启测试 cordis.yml,不手拼 `ctx.plugin`(packages/shell/tests/boot.ts,双 spec 共用)
 - [ ] 快照测试:认领注入、验收往返是模型可见行为,须有无 key 快照
 - [ ] 非平凡变更附带 Agent Note;README 用 Model Experience 格式;Known Limitations 节
 
@@ -68,3 +68,4 @@ backlog(不排期):任务间依赖动词(迁移交错场景)、webui 适配、�
 - [x] P1:项目分组·域动词——2026-08-17:任务与项目共用一条域事件流(一次 fold 产出 `{tasks, projects, archivedTasks}`),项目仅人类建改归档(PROJECT_FORBIDDEN),无状态机只有 archived 标记;create/edit 携带 projectId(键在且非空即挂入、null 即移出),提交层 append 前校验、fold 重放后查悬挂引用
 - [x] P1:项目分组·工具/命令面——2026-08-17:`task_projects` 六号工具(创建序含归档标记),`task_create`/`task_query` 带 project_id(被拒挂入连任务都不建);命令面 `/task project` 建改归档与局部面板、`create … in <项目名或前缀>`、面板两级分组(项目 → 状态,已归档项目标注并继续展示,`🗑 无项目` 收尾)、`show` 带项目行
 - [x] P1:项目分组·真模型闭环(project.e2e.spec.ts,8.7s)——2026-08-17:人类建「文档维护」项目,模型 task_projects 发现它、task_create 以列表返回的精确 id 归入、task_query 按项目收窄确认——模型全程没有编造 id
+- [x] 痛点计划·片 1「壳」——2026-08-17:`packages/shell`(`task-shell` 插件 + bin):一条命令 `corepack pnpm start [--root <目录>]` 经真实 Loader 组装 19 插件 cordis.yml(接缝 + 工具/命令面 + wake/quota/reaper 常驻),TTY 进 REPL(斜杠行走命令注册表、普通行进交互会话、事件流实时回显、`/exit` 处置退出),管道 stdin EOF 干净退出;修复 service 包缺 default export 导致原生 Loader 拒载;composition/repl 双测试经真实 Loader(shipped yml),PTY 冒烟建项目→归入→面板→落盘全通
