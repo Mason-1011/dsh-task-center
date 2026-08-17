@@ -27,6 +27,7 @@ const USAGE = [
   '  /task wake <id前缀> after <秒> | at <ISO时刻> | every <秒>',
   '                               — 定时唤醒:到点起新会话做该任务',
   '  /task nowake <id前缀>        — 取消定时唤醒',
+  '  /task release <id前缀>       — 释放持有(在办/阻塞 → 待办),死会话卡住时人工接管用',
   '  /task approve <id前缀>       — 验收通过(review → done)',
   '  /task reject <id前缀> <理由> — 打回(review → active),理由必填',
 ].join('\n')
@@ -203,6 +204,20 @@ async function run(ctx: Context, rawInput: string): Promise<CommandResult> {
     return 'code' in set
       ? failure(set)
       : { kind: 'success', text: `已设定 [${record.id.slice(0, 8)}] 定时唤醒:${describeWake(rule)}` }
+  }
+
+  if (sub === 'release') {
+    const prefix = tail.split(/\s+/, 1)[0] ?? ''
+    if (prefix === '') return { kind: 'error', text: USAGE }
+    const found = resolve(allTasks(ctx), prefix)
+    if ('error' in found) return { kind: 'error', text: found.error }
+    const { record } = found.view
+    if (found.view.archived) return { kind: 'error', text: `[${record.id.slice(0, 8)}] 已归档,无需释放` }
+    if (record.holder === undefined) return { kind: 'error', text: `[${record.id.slice(0, 8)}] 没有持有会话` }
+    const released = await ctx.tasks.mutate(record.id, record.revision, { operation: 'release' }, { kind: 'human' })
+    return 'code' in released
+      ? failure(released)
+      : { kind: 'success', text: `已释放 [${record.id.slice(0, 8)}],回到待办可认领` }
   }
 
   return { kind: 'error', text: `未知子命令 ${sub}\n${USAGE}` }

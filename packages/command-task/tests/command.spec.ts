@@ -238,6 +238,29 @@ describe('command-task', () => {
     expect(none.result).toMatchObject({ kind: 'error' })
   })
 
+  it('releases a held task back to todo for a fresh session', async () => {
+    const { ctx, agent } = await boot()
+    await dispatch(ctx, agent, '/task create stuck :: eventually')
+    const view = ctx.tasks.list({})[0]!
+    const claimed = await ctx.tasks.claim(view.record.id, modelSession, modelActor)
+    if ('code' in claimed) throw new Error(claimed.code)
+
+    const released = await dispatch(ctx, agent, `/task release ${view.record.id.slice(0, 8)}`)
+    expect(textOf(released)).toContain('已释放')
+    const task = ctx.tasks.list({})[0]!
+    expect(task.record.status).toBe('todo')
+    expect(task.record.holder).toBeUndefined()
+
+    const none = await dispatch(ctx, agent, `/task release ${view.record.id.slice(0, 8)}`)
+    expect(none.result).toMatchObject({ kind: 'error' })
+    expect((none.result as { text: string }).text).toContain('没有持有会话')
+
+    // The freed task is claimable again — the cross-session continuation path.
+    const reclaimed = await ctx.tasks.claim(view.record.id, Session.create(SessionId('s-fresh')), { kind: 'model', sessionId: SessionId('s-fresh') })
+    if ('code' in reclaimed) throw new Error(reclaimed.code)
+    expect(reclaimed.record.status).toBe('active')
+  })
+
   it('disposes its registration with the plugin fiber', async () => {
     const { ctx, fiber, agent } = await boot()
     expect(ctx.commands.find(agent, 'task')).toBeDefined()

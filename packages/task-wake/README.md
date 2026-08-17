@@ -26,6 +26,7 @@
 ## Known Limitations and Deferred Work
 
 - `done` 任务不触发唤醒(`wakeRules` 跳过):周期性例程需要"完成即重生"或模板机制(P2)。
-- 持有会话死亡后无法释放任务(缺 release 动词):续做此类任务需要状态机扩展(P1)。
+- 到点起会话前不预检额度(task-quota 的挂起规则到点即触发):到点若额度未恢复,新会话会再撞一次墙并按 task-quota 逻辑重新挂起;探测滑动留 P1。
+- 崩溃恢复不释放死持有者持有的任务:release 动词已在状态机中(命令面可人工释放),自动探测持有会话存活并代释放留 P1。
 - 锚点推进失败(如 CAS 过期)只记日志跳过,不重试本周期。
-- 工具面暂不暴露 wake-set/wake-clear:模型不能自设唤醒,待 P1 补齐。
+- 工具面暂不暴露 wake-set/wake-clear:模型走 `/task wake`/`/task nowake` 命令面;工具面补齐待 P1。

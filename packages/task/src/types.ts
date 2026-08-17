@@ -47,6 +47,7 @@ export type TaskOperation =
   | 'submit'
   | 'approve'
   | 'reject'
+  | 'release'
   | 'abandon'
   | 'wake-set'
   | 'wake-clear'
@@ -73,6 +74,7 @@ export type TaskMutation =
   | { readonly operation: 'submit'; readonly completionNote: string }
   | { readonly operation: 'approve' }
   | { readonly operation: 'reject'; readonly reason: string }
+  | { readonly operation: 'release' }
   | { readonly operation: 'abandon' }
   | { readonly operation: 'wake-set'; readonly rule: WakeRule }
   | { readonly operation: 'wake-clear' }

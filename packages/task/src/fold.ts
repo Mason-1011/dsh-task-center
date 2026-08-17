@@ -34,6 +34,7 @@ export const TRANSITIONS: Readonly<Record<TaskOperation, TransitionRule>> = {
   submit: { from: ['active'], to: 'review' },
   approve: { from: ['review'], to: 'done' },
   reject: { from: ['review'], to: 'active' },
+  release: { from: ['active', 'blocked'], to: 'todo' },
   abandon: { from: ['todo', 'active', 'blocked', 'review'], to: 'archive' },
   edit: { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
   'wake-set': { from: ['todo', 'active', 'blocked', 'done'], to: 'same' },
@@ -144,8 +145,8 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     return error('TASK_INVALID_TRANSITION', 'edit requires leaving review first (approve or reject)')
   }
   if (record.holder !== undefined && actor.kind === 'model' && actor.sessionId !== record.holder
-      && (mutation.operation === 'progress' || mutation.operation === 'block' || mutation.operation === 'submit')) {
-    return error('TASK_NOT_CLAIMED', 'only the holding session may progress, block, or submit')
+      && (mutation.operation === 'progress' || mutation.operation === 'block' || mutation.operation === 'submit' || mutation.operation === 'release')) {
+    return error('TASK_NOT_CLAIMED', 'only the holding session may progress, block, submit, or release')
   }
   const next: Draft<TaskRecord> = { ...record, revision: record.revision + 1, updatedAt: context.at }
   switch (mutation.operation) {
@@ -210,6 +211,12 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     }
     case 'wake-clear': {
       delete next.wakeRule
+      break
+    }
+    case 'release': {
+      next.status = 'todo'
+      delete next.holder
+      delete next.blockedReason
       break
     }
     case 'abandon': {

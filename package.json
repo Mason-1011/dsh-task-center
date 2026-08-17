@@ -6,7 +6,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc -p packages/task && tsc -p packages/task-local && tsc -p packages/tool-task && tsc -p packages/command-task && tsc -p packages/task-wake",
+    "typecheck": "tsc -p packages/task && tsc -p packages/task-local && tsc -p packages/tool-task && tsc -p packages/command-task && tsc -p packages/task-wake && tsc -p packages/task-quota",
     "test": "vitest run"
   },
   "devDependencies": {

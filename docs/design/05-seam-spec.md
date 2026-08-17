@@ -13,6 +13,7 @@
 | todo | `claim` | active | 任务未被活会话持有;调用会话挂入 `sessionIds` 尾部 | `TASK_NOT_FOUND` / `TASK_ALREADY_CLAIMED` |
 | active | `progress` | active | note 非空;contextPack 重算不超上限 | `TASK_NOT_CLAIMED` / `TASK_INVALID_NOTE` |
 | active | `block` | blocked | 携带 `{code, message}` 理由 | `TASK_INVALID_REASON` |
+| active / blocked | `release` | todo | 释放持有:清 holder 与 blockedReason;contextPack 保留(续做凭记忆不凭持有) | `TASK_NOT_CLAIMED` |
 | blocked | `progress` | active | 同 active/progress(自动解除阻塞) | 同上 |
 | active | `submit` | review | completion note 非空,含对照 acceptance 的自检结论 | `TASK_INVALID_NOTE` |
 | review | `approve` | done | **仅人类**(命令/面板通道;工具面不注册此操作) | `TASK_FORBIDDEN` |
@@ -28,7 +29,7 @@
 | 操作 | 模型(工具) | 人类(命令/面板) | 定时器(task-wake) |
 |---|---|---|---|
 | create / edit / abandon | ✓ | ✓ | — |
-| claim / progress / block / submit | ✓(限当前持有会话) | ✓ | —(被拉起的会话以模型 actor 走工具面) |
+| claim / progress / block / submit / release | ✓(限当前持有会话) | ✓ | —(被拉起的会话以模型 actor 走工具面) |
 | approve / reject | **✗** | ✓ | — |
 | wake-set / wake-clear | ✓ | ✓ | 仅机械簿记(S5 实现):消费到点——一次性清除、every 推进锚点,且先于起会话提交 |
 

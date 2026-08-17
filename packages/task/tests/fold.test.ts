@@ -86,6 +86,30 @@ describe('transition guards', () => {
     expect(applyMutation(record, { operation: 'progress', note: 'hi' }, { actor: stranger, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_NOT_CLAIMED', message: expect.any(String) } })
   })
 
+  it('release frees the hold back to todo, holder-only for model actors', () => {
+    let record = created()
+    record = apply({ operation: 'claim' }, record)
+    record = apply({ operation: 'release' }, record)
+    expect(record.status).toBe('todo')
+    expect(record.holder).toBeUndefined()
+    expect(record.revision).toBe(3)
+
+    // A stranger model session may not release someone else's hold.
+    record = apply({ operation: 'claim' }, record)
+    const stranger: TaskActor = { kind: 'model', sessionId: 's2' as never }
+    expect(applyMutation(record, { operation: 'release' }, { actor: stranger, at: '', packByteLimit: packLimit })).toEqual({ error: { code: 'TASK_NOT_CLAIMED', message: expect.any(String) } })
+
+    // Release also unblocks a blocked task, keeping the pack but clearing the blocked flag.
+    record = apply({ operation: 'block', reason: { code: 'quota', message: 'window reset pending' } }, record)
+    record = apply({ operation: 'release' }, record)
+    expect(record.status).toBe('todo')
+    expect(record.blockedReason).toBeUndefined()
+    expect(record.contextPack).toContain('BLOCKED quota')
+    // Human may release any held task.
+    const humanReleased = apply({ operation: 'release' }, apply({ operation: 'claim' }, record), actorHuman)
+    expect(humanReleased.holder).toBeUndefined()
+  })
+
   it('blocked resolves on the next progress', () => {
     let record = created()
     record = apply({ operation: 'claim' }, record)
