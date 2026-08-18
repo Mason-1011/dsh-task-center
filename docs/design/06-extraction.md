@@ -68,13 +68,13 @@
 
 ## 6. 抽取规则:常驻结构档 + 兜底总结档
 
-同一会话一次抽取至多产出**一条**候选,取结构最全的来源,优先级:**goal > 已批计划 > todo 锚定 Query** —— 三者常是同一件事的三个影子,合并成一条。
+同一会话一次抽取,出生按结构优先级:**goal > 已批计划 > todo 锚定 Query** —— 三者常是同一件事的三个影子,不重复出生(有未完 goal 时计划/todo 档不出生,有已批计划时 todo 档不出生;goal 档逐 goal 出生,v1 可同会话多条)。**撤销(6b 落地)与出生无关**:任一档出现"做完了"的正证据(goal 完结/清除、todo 全勾或清空),该档 pending 的候选即自动 superseded。
 
 **结构·goal(片 6a,零模型成本)**:fold 该会话的 goal;phase 为 active / paused / blocked(非 complete、非已 clear)→ 候选。objective 直取 goal.objective,blocker 写入备注。
 
-**结构·已批计划(片 6b,零模型成本)**:计划全文躺在 `exit_plan_mode` 的必填 `plan` 参数里,批准走 `ctx.userQuestions` 精确批准 —— 不需要模型总结。判定"已批":会话从 `plan/mode` active 翻出且翻转不是 `command/run` 的 `/plan off`(两条路径事件流可区分)。会话结束若计划对应的活没做完(证据:未完成 todo,或批准后再无完成性事件)→ 候选:**计划标题 = objective 草稿,计划正文 = 备注**。
+**结构·已批计划(片 6b,已实现,零模型成本)**:计划全文躺在 `exit_plan_mode` 的必填 `plan` 参数里,批准走 `ctx.userQuestions` 精确批准 —— 不需要模型总结。判定"已批"(落地):`exit_plan_mode` 的 `tool/call` 与**无 error 的 `tool/result`** 配对 —— 拒绝/取消都在工具内抛错、结果带 error,`/plan off` 根本不发这个调用,因此不依赖滞后一步提交的 `plan/mode` 翻转。做完的判据:最新 todo 快照全勾(或已清空);没做完则产候选(**计划标题 = objective 草稿,计划正文 = 备注**):有未完 todo 即候选;从未写 todo 的,仅当批准后再无任何模型动作(动过手但没跟踪的停滞是总结档的案子)。全勾之后,该会话 pending 的计划候选自动 superseded。
 
-**结构·todo 锚定 Query(片 6b,零模型成本)**:todo 不逐条成候选;相邻 `todo/write` 整表快照差分,**新增条目锚定到它前面最近的一条人类消息**(插件/工具来源事件跳过 —— 纯日志连接)。会话存在未完成条目且无 goal/已批计划时 → 候选:**objective 草稿 = 触发该 todo 链的用户原话**,未完成条目列入备注。锚定是结构启发式(最近人类消息)而非因果判定,人确认兜底。若该会话持有某任务,未完 todo 同时并入该任务的候选备注。
+**结构·todo 锚定 Query(片 6b,已实现,零模型成本)**:todo 不逐条成候选;相邻 `todo/write` 整表快照差分,**新增条目锚定到它前面最近的一条人类消息**(`source.kind === 'user'` 才算人类;插件通知/工具结果跳过 —— 纯日志连接)。会话存在未完成条目且无 goal/已批计划时 → 候选:**objective 草稿 = 触发该 todo 链的用户原话(取第一非空行)**,未完成条目列入备注;origin key = 锚定消息的 seq(新链 = 新候选)。锚定是结构启发式(最近人类消息)而非因果判定,人确认兜底。多链取最近链(v1,§10.4);全勾后该会话 pending 的 todo 候选自动 superseded。(未完 todo 并入该会话所持任务的备注:未做,随 7b 进度回流片定。)
 
 **兜底·总结档(片 6c,一次模型调用)**:无 goal、未走计划模式、也没写 todo 的会话,静默过 `idleHours` 后起一次总结会话(走 §4 的限流与配额 probe),按 §2 三必要条件判定:**全满足才产候选(objective + acceptance 必填),否则记"无任务"水位**。不再要求人挑会话;看板上保留手动入口(对未到闲置时间的会话立即可抽)。
 
@@ -104,7 +104,7 @@ headless 一次性会话在 `session/disposed` 时做最终一次第二层冲刷
 | 片 | 内容 | 可测性 |
 |---|---|---|
 | 6a | 候选实体族 + 触发骨架(水位跟踪、闲置扫描、disposed 立即)+ goal→候选 + promote/ignore/superseded + 看板列 + 命令 ——✅ 2026-08-18 | 全 keyless:goal/change 事件可构造、fold 与水位可断言 |
-| 6b | 已批计划→候选 + todo 锚定 Query→候选(两个纯日志 fold) | keyless |
+| 6b | 已批计划→候选 + todo 锚定 Query→候选(两个纯日志 fold)——✅ 2026-08-18 | keyless |
 | 6c | 兜底总结档:总结会话 + §2 判据门 + 去重 + 配额 probe + 每轮限流 | keyless 脚本适配器 + 真模型 e2e(自跳过) |
 | 7a | 进度第一层:闲置显示连接持有会话活跃度(展示侧,零写入) | keyless |
 | 7b | 进度第二层:回合末 todo 差分/goal 变化 → 上下文包增量(含 disposed 冲刷、CAS 重试) | keyless |
