@@ -1,10 +1,11 @@
 /**
- * Keyless progress-reflow tests (design 06 §7 第二层): the window fold over
- * todo tables and goal changes, the note rendering, and the closed loop —
- * a closing turn writes one `progress` line into the holding session's tasks
- * with a session receipt, pure chatter writes nothing, compare-and-set
- * collisions retry once then drop, and a disposed session flushes the turn
- * it died in without a receipt.
+ * Keyless progress-reflow tests (design 06 §7 第二层 + 第三层): the window
+ * fold over todo tables and goal changes, the note rendering, the closed
+ * loop — a closing turn writes one `progress` line into the holding
+ * session's tasks with a session receipt, pure chatter writes nothing,
+ * compare-and-set collisions retry once then drop, and a disposed session
+ * flushes the turn it died in without a receipt — and the goal mirror:
+ * decisive goal transitions park or submit the held tasks.
  * @module @task-center/task-source/tests/reflow
  */
 
@@ -21,7 +22,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
 import type { TaskView } from '@task-center/task'
-import { foldEvidence, reflowHeldTasks, renderEvidence } from '../src/index.ts'
+import { foldEvidence, foldGoalMirrors, reflowHeldTasks, renderEvidence } from '../src/index.ts'
 import * as TaskSource from '../src/index.ts'
 
 /** Boot the agent spine plus the task seam — no extractor yet. */
@@ -321,5 +322,121 @@ describe('turn reflow closed loop', () => {
     const pack = ctx.tasks.get(view.record.id)!.record.contextPack
     expect(pack).not.toContain('历史一 pending→completed')
     expect(pack).toContain('+ 恢复后新条目(pending)')
+  })
+})
+
+describe('goal mirror', () => {
+  it('folds decisive transitions only: latest per goal wins, ordered by their final event', () => {
+    const events = renumber([
+      eventOf('goal/change', { kind: 'goal/change', version: 1, operation: 'block', goal: { id: GoalId('g-1'), revision: 1, objective: '暗色', phase: 'blocked', blockedReason: { code: 'token', message: '令牌未定' }, maxGoalRounds: 5 }, roundsStarted: 0, createdAt: 1_000, updatedAt: 1_000 }, 1_000),
+      turnEnd(1, 1_500),
+      // Same goal resumes then completes inside the window: latest (complete) wins.
+      eventOf('goal/change', { kind: 'goal/change', version: 1, operation: 'resume', goal: { id: GoalId('g-1'), revision: 2, objective: '暗色', phase: 'active', maxGoalRounds: 5 }, roundsStarted: 0, createdAt: 1_000, updatedAt: 2_000 }, 2_000),
+      eventOf('goal/change', { kind: 'goal/change', version: 1, operation: 'complete', goal: { id: GoalId('g-1'), revision: 3, objective: '暗色', phase: 'complete', maxGoalRounds: 5 }, roundsStarted: 1, createdAt: 1_000, updatedAt: 2_100 }, 2_100),
+      // A second goal blocks after it: both goals mirror, in final-event order.
+      eventOf('goal/change', { kind: 'goal/change', version: 1, operation: 'block', goal: { id: GoalId('g-2'), revision: 1, objective: '迁移文档', phase: 'blocked', blockedReason: { code: 'deps', message: '上游未发版' }, maxGoalRounds: 5 }, roundsStarted: 0, createdAt: 2_200, updatedAt: 2_200 }, 2_200),
+      // An edit while blocked keeps the phase: no mirror of its own.
+      eventOf('goal/change', { kind: 'goal/change', version: 1, operation: 'edit', goal: { id: GoalId('g-2'), revision: 2, objective: '迁移文档(改)', phase: 'blocked', blockedReason: { code: 'deps', message: '上游未发版' }, maxGoalRounds: 5 }, roundsStarted: 0, createdAt: 2_200, updatedAt: 2_300 }, 2_300),
+      turnEnd(2, 2_500),
+    ])
+    expect(foldGoalMirrors(events, events[1]!.seq, events[6]!.seq)).toEqual([
+      { kind: 'complete', goalId: 'g-1', objective: '暗色' },
+      { kind: 'blocked', goalId: 'g-2', objective: '迁移文档', reason: { code: 'deps', message: '上游未发版' } },
+    ])
+    // Outside the window: nothing.
+    expect(foldGoalMirrors(events, events[6]!.seq, events[6]!.seq)).toEqual([])
+  })
+
+  it('parks a held task on a non-quota block, and the goal evidence line lands beside the BLOCKED line', { timeout: 8_000 }, async () => {
+    const ctx = await boot()
+    const before = Date.now()
+    const session = liveSession(ctx, 's-block', renumber([
+      turnStart(1, before), userMessage('开工', before + 1), turnEnd(1, before + 2),
+    ]))
+    const view = await heldTask(ctx, 's-block')
+    await ctx.plugin(TaskSource, sourceConfig())
+    session.append('goal/change', {
+      kind: 'goal/change', version: 1, operation: 'block',
+      goal: { id: GoalId('g-9'), revision: 1, objective: '支持暗色模式', phase: 'blocked', blockedReason: { code: 'token', message: '颜色令牌未定' }, maxGoalRounds: 5 },
+      roundsStarted: 0, createdAt: before, updatedAt: before + 3,
+    })
+    session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    await until(() => ctx.tasks.get(view.record.id)!.record.status === 'blocked')
+    const record = ctx.tasks.get(view.record.id)!.record
+    expect(record.blockedReason).toEqual({ code: 'token', message: '颜色令牌未定' })
+    // Progress evidence and the state transition are two distinct pack lines.
+    expect(record.contextPack).toContain('自动回流 goal: goal 支持暗色模式: blocked(token: 颜色令牌未定)')
+    expect(record.contextPack).toContain('BLOCKED token: 颜色令牌未定')
+    expect(session.events.some(event => event.type === 'task/change')).toBe(true)
+  })
+
+  it('submits on goal completion — even out of a blocked task, because the progress write normalized it first', { timeout: 8_000 }, async () => {
+    const ctx = await boot()
+    const now = Date.now()
+    const session = liveSession(ctx, 's-done', renumber([
+      turnStart(1, now), userMessage('开工', now + 1), turnEnd(1, now + 2),
+    ]))
+    const view = await heldTask(ctx, 's-done')
+    const actor = { kind: 'model' as const, sessionId: SessionId('s-done') }
+    const parked = await ctx.tasks.mutate(view.record.id, view.record.revision,
+      { operation: 'block', reason: { code: 'token', message: '颜色令牌未定' } }, actor, session)
+    if ('code' in parked) throw new Error(parked.code)
+    await ctx.plugin(TaskSource, sourceConfig())
+    // One window carrying resume then complete of the same goal.
+    session.append('goal/change', {
+      kind: 'goal/change', version: 1, operation: 'resume',
+      goal: { id: GoalId('g-8'), revision: 2, objective: '支持暗色模式', phase: 'active', maxGoalRounds: 5 },
+      roundsStarted: 0, createdAt: now, updatedAt: now + 3,
+    })
+    session.append('goal/change', {
+      kind: 'goal/change', version: 1, operation: 'complete',
+      goal: { id: GoalId('g-8'), revision: 3, objective: '支持暗色模式', phase: 'complete', maxGoalRounds: 5 },
+      roundsStarted: 1, createdAt: now, updatedAt: now + 4,
+    })
+    session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    await until(() => ctx.tasks.get(view.record.id)!.record.status === 'review')
+    const record = ctx.tasks.get(view.record.id)!.record
+    expect(record.contextPack).toContain('SUBMITTED: 由 goal「支持暗色模式」完成自动提交,请按验收标准人工裁决')
+    expect(record.blockedReason).toBeUndefined()
+    // Submit parks the task in review but keeps the hold: the human verdict releases it.
+    expect(record.holder).toBe(SessionId('s-done'))
+  })
+
+  it('skips quota-coded blocks and tasks outside active', { timeout: 8_000 }, async () => {
+    const ctx = await boot()
+    const now = Date.now()
+    const parkedSession = liveSession(ctx, 's-quota', renumber([
+      turnStart(1, now), userMessage('开工', now + 1), turnEnd(1, now + 2),
+    ]))
+    const parkedView = await heldTask(ctx, 's-quota')
+    await ctx.plugin(TaskSource, sourceConfig())
+    parkedSession.append('goal/change', {
+      kind: 'goal/change', version: 1, operation: 'block',
+      goal: { id: GoalId('g-7'), revision: 1, objective: '批量翻译', phase: 'blocked', blockedReason: { code: 'QUOTA_EXCEEDED', message: '额度用尽' }, maxGoalRounds: 5 },
+      roundsStarted: 0, createdAt: now, updatedAt: now + 3,
+    })
+    parkedSession.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    await until(() => ctx.tasks.get(parkedView.record.id)!.record.contextPack.includes('自动回流'))
+    // Quota is task-quota's lifecycle: the mirror left the state alone.
+    expect(ctx.tasks.get(parkedView.record.id)!.record.status).toBe('active')
+
+    // A task already awaiting verdict: submit from review is the human's call.
+    const reviewSession = liveSession(ctx, 's-review', renumber([
+      turnStart(1, now), userMessage('收尾', now + 1), turnEnd(1, now + 2),
+    ]))
+    const reviewView = await heldTask(ctx, 's-review')
+    const actor = { kind: 'model' as const, sessionId: SessionId('s-review') }
+    const submitted = await ctx.tasks.mutate(reviewView.record.id, reviewView.record.revision,
+      { operation: 'submit', completionNote: '模型自报完成' }, actor, reviewSession)
+    if ('code' in submitted) throw new Error(submitted.code)
+    reviewSession.append('goal/change', {
+      kind: 'goal/change', version: 1, operation: 'complete',
+      goal: { id: GoalId('g-6'), revision: 1, objective: '收尾', phase: 'complete', maxGoalRounds: 5 },
+      roundsStarted: 0, createdAt: now, updatedAt: now + 3,
+    })
+    reviewSession.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    await until(() => ctx.tasks.get(reviewView.record.id)!.record.contextPack.includes('SUBMITTED: 模型自报完成'))
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(ctx.tasks.get(reviewView.record.id)!.record.status).toBe('review')
   })
 })

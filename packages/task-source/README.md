@@ -34,6 +34,8 @@
 - 结算标记在首个 await 前同步推进,背靠背回合不双结算;首次结算种子只数**严格早于本次回合**的 turn/end——挂载后才结束的回合整回合回流(补上本进程错过的回流,崩溃恢复),纯历史回合永不回流。
 - `session/disposed` 终冲:死在半回合的 headless 会话在处置时冲刷它没能闭合的那回合,不写回执(日志已闭合)。
 
+**goal 相变镜像(7c,同一窗口、progress 之后应用)**:goal 的判定性转移镜像进所持任务的状态——`blocked`(非配额码;配额码是 task-quota 的职责)带卡点原因置 blocked,`complete` 自动提交进"待验收"(completion note 注明自动提交,人仍是终审,submit 保留持有)。只认 operation 进入 blocked/complete 的转移(blocked 中 edit、resume 不镜像);同 goal 窗口内多次变化取最终相;仅 active 任务镜像(block/submit 的唯一合法源);progress 写入在前会把 blocked 归一化回 active,故"先阻塞后完成"仍能提交。CAS 同款重试一次再丢——证据行已在 pack 里,状态丢了看得见。
+
 ## 配置(cordis.yml `config`,无硬编码可调项)
 
 | 字段 | 含义 |
@@ -50,4 +52,6 @@
 - 已批计划档"做完"的判据只有 todo 全勾/清空;没写 todo 又动过手的计划不成候选(总结档只在全无结构信号时启动,这类"有计划但没跟踪"的停滞两档都不接——真实使用出现再定归属)。
 - 同会话多条未完 goal 各产一条候选(goal id 为 key);跨会话同一主题不去重(goal id 跨会话不复用);todo 多链取最近链(设计稿 §10.4);总结档同会话固定单候选,会话中途换主题不另生新候选。
 - 已处置会话的入队总结请求不落盘,进程重启即丢;活会话无此问题(水位重播)。
-- 进度回流第三层(goal 相变镜像:blocked 非配额码 / complete 自动提交,7c)规划住在本包,尚未实现;第一层闲置显示连接是纯展示 join,住 `@task-center/task`。
+- 多 goal 并发于同一任务:镜像按事件序应用,后到者可能撞转换表被丢(block 后 complete 来自不同 goal 时 submit 从 blocked 不合法)——v1 已知限制,人从面板与 pack 证据行可见。
+- goal resume 不反向镜像(阻塞任务不会因 goal 恢复自动回 active):解阻塞仍由模型的 task_update/progress 承担。
+- 第一层闲置显示连接是纯展示 join,住 `@task-center/task`。

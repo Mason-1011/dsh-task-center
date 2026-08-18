@@ -15,7 +15,9 @@
  * capped. The same skeleton also reflows progress: each turn a holding
  * session closes with todo or goal evidence writes one `progress` line into
  * every task it holds, so the ledger learns what the conversation did
- * without waiting for the model to report it.
+ * without waiting for the model to report it — and a goal entering `blocked`
+ * (non-quota) or `complete` mirrors into the held tasks' state: the ledger's
+ * status follows the goal the conversation already recorded.
  * Spec: docs/design/06-extraction.md §4–§7.
  * @module @task-center/task-source
  */
@@ -633,6 +635,98 @@ export async function reflowHeldTasks(
   }
 }
 
+/** One goal's decisive phase change inside a settled window (design 06 §7 第三层). */
+export type GoalMirror =
+  | { readonly kind: 'blocked'; readonly goalId: string; readonly objective: string; readonly reason: { readonly code: string; readonly message: string } }
+  | { readonly kind: 'complete'; readonly goalId: string; readonly objective: string }
+
+/**
+ * Fold a settled window's decisive goal transitions — changes whose operation
+ * enters `blocked` or `complete`. Latest change per goal id wins (a goal that
+ * flips twice in one window counts once, at its final phase); mirrors come
+ * back ordered by that final change's seq. Operations that keep the phase
+ * (edit while blocked, resume into active) carry no state to mirror.
+ * @param events - the complete session log, in seq order.
+ * @param settledThrough - exclusive lower bound of the window.
+ * @param endSeq - inclusive upper bound of the window.
+ * @returns the window's decisive goal transitions, in event order.
+ */
+export function foldGoalMirrors(
+  events: readonly SessionEvent[],
+  settledThrough: number,
+  endSeq: number,
+): readonly GoalMirror[] {
+  const mirrors = new Map<string, { seq: number; mirror: GoalMirror }>()
+  for (const event of events) {
+    if (event.type !== 'goal/change') continue
+    const change: GoalChangeMeta = event.data
+    if (event.seq <= settledThrough || event.seq > endSeq) continue
+    const mirror: GoalMirror | undefined = change.operation === 'block' && change.goal.blockedReason !== undefined
+      ? {
+        kind: 'blocked',
+        goalId: change.goal.id,
+        objective: change.goal.objective,
+        reason: { code: change.goal.blockedReason.code, message: change.goal.blockedReason.message },
+      }
+      : change.operation === 'complete'
+        ? { kind: 'complete', goalId: change.goal.id, objective: change.goal.objective }
+        : undefined
+    if (mirror !== undefined) mirrors.set(mirror.goalId, { seq: event.seq, mirror })
+  }
+  return [...mirrors.values()].sort((left, right) => left.seq - right.seq).map(entry => entry.mirror)
+}
+
+/**
+ * Mirror one window's decisive goal transitions into every task the session
+ * holds: a non-quota `blocked` parks the task with the goal's reason; a
+ * `complete` submits it into review with a note naming the automatic
+ * submission — the human stays the final judge. Only `active` tasks mirror
+ * (`block` and `submit` are legal from `active` alone); the window's progress
+ * write runs first and normalizes `blocked` back to `active`, so a goal that
+ * unblocks into completion within the window still submits. Quota-coded
+ * blocks are skipped — task-quota owns the quota lifecycle. Compare-and-set
+ * collisions retry once against the fresh revision; a second failure drops
+ * the mirror (the evidence line in the pack still says what happened).
+ * @param ctx - Context carrying `tasks`.
+ * @param sessionId - the holding session whose goal transitions these are.
+ * @param mirrors - the window's decisive transitions, in event order.
+ * @param receipt - the live session to write the `task/change` receipt into; omit for a disposed session.
+ */
+export async function mirrorHeldTasks(
+  ctx: Context,
+  sessionId: SessionId,
+  mirrors: readonly GoalMirror[],
+  receipt?: Session,
+): Promise<void> {
+  if (mirrors.length === 0) return
+  const logger = ctx.logger('task-source')
+  const actor: TaskActor = { kind: 'model', sessionId }
+  for (const view of ctx.tasks.list({ includeArchived: true })) {
+    const { id, holder, status } = view.record
+    if (view.archived || holder !== sessionId || status !== 'active') continue
+    let revision = view.record.revision
+    for (const mirror of mirrors) {
+      if (mirror.kind === 'blocked' && mirror.reason.code === QUOTA_EXCEEDED_CODE) continue
+      const mutation = mirror.kind === 'blocked'
+        ? { operation: 'block' as const, reason: mirror.reason }
+        : { operation: 'submit' as const, completionNote: `由 goal「${mirror.objective}」完成自动提交,请按验收标准人工裁决` }
+      let attempted = await ctx.tasks.mutate(id, revision, mutation, actor, receipt)
+      if ('code' in attempted && attempted.code === 'TASK_STALE_REVISION') {
+        const current = ctx.tasks.get(id)
+        if (current !== undefined && current.record.holder === sessionId && current.record.status === 'active') {
+          revision = current.record.revision
+          attempted = await ctx.tasks.mutate(id, revision, mutation, actor, receipt)
+        }
+      }
+      if ('code' in attempted) {
+        logger.warn('mirror dropped', { sessionId, taskId: id, goalId: mirror.goalId, code: attempted.code })
+        continue
+      }
+      revision = attempted.record.revision
+    }
+  }
+}
+
 /** Per-session trigger state: what happened, and what extraction has covered. */
 interface Watermark {
   /** Seq of the newest event seen; moves on every `session/event`. */
@@ -686,7 +780,8 @@ interface Probe {
  * request whose session was disposed first is queued — the tick is its only
  * remaining carrier. Progress reflow rides the same stream: every `turn/end`
  * settles its window's todo/goal evidence into the closing session's held
- * tasks, and a disposed session gets one final flush of the turn it died in.
+ * tasks (a decisive goal transition mirrors into their state), and a disposed
+ * session gets one final flush of the turn it died in.
  * @param ctx - Plugin context.
  * @param config - Scan cadence, idle threshold, summarizer route, and caps.
  */
@@ -788,10 +883,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
 
   /**
-   * Settle one window's evidence into the held tasks. The mark advances
-   * synchronously before the first await, so back-to-back turns never
-   * double-settle the same window. A dropped write (CAS twice stale, task
-   * moved on) consumes its window: the next window's diff carries the
+   * Settle one window's evidence into the held tasks: the progress write
+   * first, then the goal-state mirror (progress normalizes `blocked` back to
+   * `active`, so the mirror's block/submit stays transition-legal). The mark
+   * advances synchronously before the first await, so back-to-back turns
+   * never double-settle the same window. A dropped write (CAS twice stale,
+   * task moved on) consumes its window: the next window's diff carries the
    * table forward.
    */
   const settleWindow = async (session: Session, endSeq: number, receipt: Session | undefined): Promise<void> => {
@@ -799,6 +896,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const note = renderEvidence(foldEvidence(session.events, mark, endSeq))
     settledThrough.set(session.id, endSeq)
     if (note !== '') await reflowHeldTasks(ctx, session.id, note, receipt)
+    await mirrorHeldTasks(ctx, session.id, foldGoalMirrors(session.events, mark, endSeq), receipt)
   }
 
   ctx.on('session/event', (session, event) => {
