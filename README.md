@@ -74,6 +74,11 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
       config:
         pollSeconds: 30
         idleHours: 3
+        agent:
+          provider: deepseek-official
+          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
+        summariesPerTick: 2
+        transcriptEvents: 40
     - id: tool-task
       name: '@task-center/tool-task'
       config: {}

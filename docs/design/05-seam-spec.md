@@ -68,7 +68,7 @@
 | `candidate-ignore` | 仅人类;终态 | 同上 CAS 两码 + `CANDIDATE_FORBIDDEN` / `CANDIDATE_INVALID_TRANSITION` |
 | `candidate-supersede` | 仅 source actor(来源会话把事做完了);理由必填;终态 | 同上 + `CANDIDATE_INVALID_REASON` |
 
-记录字段:id、origin(`sessionId` + tier + key)、objective / acceptance 草稿(结构档 acceptance 留空由人补)、note(blocker / 计划正文等)、promotedTaskId(晋升后)、createdAt、revision。候选不持上下文包——它只有草稿,不是工作现场。人类与 source 的候选变更只落域事件,不写会话回执(它们不经会话内的模型)。
+记录字段:id、origin(`sessionId` + tier + key;tier ∈ goal / plan / todo / summary,key 稳定于来源记录)、objective / acceptance 草稿(结构档 acceptance 留空由人补;总结档是唯一自动填验收草稿的档——三必要条件要求它写得出来)、note(blocker / 计划正文 / 未完 todo / 总结补充说明)、promotedTaskId(晋升后)、createdAt、revision。候选不持上下文包——它只有草稿,不是工作现场。人类与 source 的候选变更只落域事件,不写会话回执(它们不经会话内的模型)。
 
 ## 2. 会话事件(进 `SessionEventMap`,required-on-read)
 
