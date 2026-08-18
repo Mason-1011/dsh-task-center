@@ -1,6 +1,6 @@
 # 06 抽取层:任务从已有记录出生
 
-状态:已定稿;实现中——片 6a/6b/6c 已落地(2026-08-18,见 §9 切分表),7a 起按表推进。前置判断:任务不应该是独立于 plan / goal / 普通对话之外的东西,而应能从 dsh 已有的功能与记录中抽取;抽取要自动化、无感,同时要有严格的"什么是任务"判据防噪声。
+状态:已定稿;实现中——片 6a/6b/6c/7a 已落地(2026-08-18,见 §9 切分表),7b 起按表推进。前置判断:任务不应该是独立于 plan / goal / 普通对话之外的东西,而应能从 dsh 已有的功能与记录中抽取;抽取要自动化、无感,同时要有严格的"什么是任务"判据防噪声。
 
 ## 1. 问题:出生通道与原始记录脱节
 
@@ -82,7 +82,7 @@
 
 出生之后,进度回流现状全靠模型自觉(`task_update`/`task_report`),会话干了一下午不汇报,台账就撒谎("闲置 3 天"而活干了一半)。与出生同一思路:会话日志里已有进度证据,让它们自动回流。**只有持有会话的信号回流**;陌生会话依法不能动别人的任务,子任务各有各的持有者,父任务闲置已按子树取新鲜值。
 
-**第一层·活跃度(零写入,展示侧连接)**:闲置显示取 `max(台账 workedAt, 持有会话最后事件时间)` —— 持有会话在动 = 这条线没被搁下。不产生账本事件,不与模型自身的 task_update 撞版本号(CAS)。持有会话不在进程内(已死/未运行)时退回台账 workedAt。
+**第一层·活跃度(零写入,展示侧连接,片 7a 已实现)**:闲置显示取 `max(台账 workedAt, 持有会话最后事件时间)` —— 持有会话在动 = 这条线没被搁下。不产生账本事件,不与模型自身的 task_update 撞版本号(CAS)。持有会话不在进程内(已死/未运行)时退回台账 workedAt。`session/end-seed` 是挂载时打的账面标记,不算活动 —— 从盘上恢复的会话不能因为被挂载就显得新鲜。落地归属:`effectiveIdle` 的第 4 参 `holderActivity` 连接器在 `@task-center/task`(`idle.ts`,`lastSessionActivity` 跳过 end-seed),面板(command-task)与看板(task-web)各自经 `ctx.sessions.get` 提供连接 —— 纯展示 join,不进 task-source(§9 归属段的修订)。
 
 **第二层·上下文包增量(回合末一次写入)**:持有会话每回合结束,本回合若有 **todo 差分**(勾选推进)或 goal 变化,自动追加一条 progress 进上下文包,actor 记为该持有会话(权限矩阵天然满足)。纯闲聊回合不写 —— 包的每行都要有内容;沿既有字节上限截断。与模型自己的 task_update 撞 revision 时:同步侧读最新 revision 重试一次,再失败则丢弃(下回合差分自然补上,进度不丢)。
 
@@ -106,11 +106,11 @@ headless 一次性会话在 `session/disposed` 时做最终一次第二层冲刷
 | 6a | 候选实体族 + 触发骨架(水位跟踪、闲置扫描、disposed 立即)+ goal→候选 + promote/ignore/superseded + 看板列 + 命令 ——✅ 2026-08-18 | 全 keyless:goal/change 事件可构造、fold 与水位可断言 |
 | 6b | 已批计划→候选 + todo 锚定 Query→候选(两个纯日志 fold)——✅ 2026-08-18 | keyless |
 | 6c | 兜底总结档:总结会话 + §2 判据门 + 去重 + 配额 probe + 每轮限流 ——✅ 2026-08-18 | keyless 脚本适配器 + 真模型 e2e(自跳过;summary.e2e.spec.ts,搁置意图产候选、已解答问答产 none) |
-| 7a | 进度第一层:闲置显示连接持有会话活跃度(展示侧,零写入) | keyless |
+| 7a | 进度第一层:闲置显示连接持有会话活跃度(展示侧,零写入)——✅ 2026-08-18 | keyless:idle 纯函数 + 面板/看板两处真实组合(shell composition 测试) |
 | 7b | 进度第二层:回合末 todo 差分/goal 变化 → 上下文包增量(含 disposed 冲刷、CAS 重试) | keyless |
 | 7c | 进度第三层:goal 相变镜像(blocked 非配额码 / complete 自动提交) | keyless |
 
-插件包 `task-source`:水位跟踪、事件 fold、产候选、进度回流;task-wake 同款 tick 模式(独立 timer,不混入巡检)。config:`pollSeconds`(扫描间隔)、`idleHours`(默认 3)、`agent`(总结会话路由)、`summariesPerTick`(每轮总结上限)、`transcriptEvents`(总结提示词携带的近 N 条消息)——6c 起全部生效。
+插件包 `task-source`:水位跟踪、事件 fold、产候选;task-wake 同款 tick 模式(独立 timer,不混入巡检)。config:`pollSeconds`(扫描间隔)、`idleHours`(默认 3)、`agent`(总结会话路由)、`summariesPerTick`(每轮总结上限)、`transcriptEvents`(总结提示词携带的近 N 条消息)。进度回流的归属按层拆:7a 是纯展示 join,住在 `@task-center/task`(`idle.ts`)+ 面板/看板两个消费方;7b/7c 产生账本事件,住 `task-source`。
 
 ## 10. 开放问题(定稿前定)
 

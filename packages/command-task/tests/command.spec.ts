@@ -15,7 +15,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import type { CommandExecution } from '@deepseek-ai/dsh-commands'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import * as llmDeepseek from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -241,6 +241,54 @@ describe('command-task', () => {
       expect(fresh).toContain('旧账 · 闲置 1 天')
       expect(fresh).not.toContain('长线 · 闲置')
       expect(fresh).not.toContain('新事 · 闲置')
+    } finally {
+      vi.useRealTimers()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('reads the live holder session as activity: a working holder never shows idle', async () => {
+    const { ctx, agent } = await boot()
+    try {
+      const present = Date.now()
+      vi.useFakeTimers()
+      vi.setSystemTime(present - 4.5 * DAY_MS)
+      await dispatch(ctx, agent, '/task create 在干 :: 一条线')
+      await dispatch(ctx, agent, '/task create 死线 :: 另一条线')
+      const views = ctx.tasks.list({})
+      // One holder live in this process, one that died (never entered here).
+      const live = ctx.sessions.create(SessionId('s-live'))
+      const worked = views.find(view => view.record.objective === '在干')!
+      const claimed = await ctx.tasks.claim(worked.record.id, live, { kind: 'model', sessionId: live.id })
+      if ('code' in claimed) throw new Error(claimed.code)
+      const deadSession = Session.create(SessionId('s-dead'))
+      const dead = views.find(view => view.record.objective === '死线')!
+      const deadClaimed = await ctx.tasks.claim(dead.record.id, deadSession, { kind: 'model', sessionId: deadSession.id })
+      if ('code' in deadClaimed) throw new Error(deadClaimed.code)
+      // Back to the present: the live holder says something an hour ago.
+      vi.setSystemTime(present - 3_600_000)
+      live.append('user/message', createUserMessage({ content: [{ type: 'text', text: '还在干' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      vi.setSystemTime(present)
+
+      const panel = textOf(await dispatch(ctx, agent, '/task'))
+      // The working holder keeps its line fresh; the dead one is 4 days idle
+      // and carries the banner — same ledger age, different liveness.
+      expect(panel).not.toContain('在干 · 闲置')
+      expect(panel).toContain('死线 · 闲置 4 天')
+      expect(panel).toContain('⚠ 搁置最久(闲置 4 天)')
+      expect(panel).toContain('@s-dead: 死线 · 闲置 4 天')
+      expect(panel).toContain('@s-live: 在干\n')
+
+      // The project listing joins the same way.
+      await dispatch(ctx, agent, '/task project create 阵地')
+      await dispatch(ctx, agent, '/task create 阵地活 :: x in 阵地')
+      const held = ctx.tasks.list({}).find(view => view.record.objective === '阵地活')!
+      const heldClaimed = await ctx.tasks.claim(held.record.id, live, { kind: 'model', sessionId: live.id })
+      if ('code' in heldClaimed) throw new Error(heldClaimed.code)
+      const listing = textOf(await dispatch(ctx, agent, '/task project'))
+      expect(listing).toContain('阵地 [')
+      expect(listing).toContain('1 个任务')
+      expect(listing).not.toContain('1 个任务 · 闲置')
     } finally {
       vi.useRealTimers()
       await ctx.fiber.dispose()

@@ -9,14 +9,14 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
-import { effectiveIdle } from '@task-center/task'
-import type { CandidateView, ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
+import { effectiveIdle, lastSessionActivity } from '@task-center/task'
+import type { CandidateView, HolderActivity, ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
 
-/** The task seam and the command registry must be present. */
-export const inject = ['tasks', 'commands']
+/** The task seam, the command registry, and the session store must be present. */
+export const inject = ['tasks', 'sessions', 'commands']
 
 // Re-exported for existing importers; the implementation moved to the seam.
 export { idleDays } from '@task-center/task'
@@ -83,6 +83,18 @@ function lineOf(view: TaskView, idle: number): string {
   return `- [${view.record.id.slice(0, 8)}] r${view.record.revision} ${STATUS_LABEL[view.record.status]}${holder}: ${view.record.objective}${idleSuffix(view, idle)}${pack}${wake}${spawn}`
 }
 
+/**
+ * Live holder-session activity for the display idle join: a holder session at
+ * work keeps its task line alive with zero ledger writes; sessions not live
+ * in this process fall back to the ledger's `workedAt`.
+ */
+function holderActivityOf(ctx: Context): HolderActivity {
+  return sessionId => {
+    const session = ctx.sessions.get(sessionId)
+    return session === undefined ? undefined : lastSessionActivity(session.events)
+  }
+}
+
 /** Every live or archived task, so prefix matching never misses over the cap. */
 function allTasks(ctx: Context): TaskView[] {
   return ctx.tasks.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
@@ -142,7 +154,8 @@ function panel(ctx: Context, config: Config, now: Date, status?: TaskStatus, pro
     const scope = projectId === undefined ? '' : '该项目下'
     return { kind: 'success', text: status === undefined ? `任务队列${scope}为空` : `${STATUS_LABEL[status]}${scope}为空` }
   }
-  const idler = (view: TaskView): number => effectiveIdle(ctx.tasks, view, now)
+  const holderActivity = holderActivityOf(ctx)
+  const idler = (view: TaskView): number => effectiveIdle(ctx.tasks, view, now, holderActivity)
   const sections: string[] = []
   // The stalest open task is pinned above every group once it crosses the
   // configured threshold — the "forgot to pick this back up" line.
@@ -179,6 +192,7 @@ function describeWake(rule: WakeRule): string {
 
 /** Detail view of one task, its live children, and the context-pack tail. */
 function show(ctx: Context, view: TaskView, now: Date): CommandResult {
+  const holderActivity = holderActivityOf(ctx)
   const record = view.record
   const pack = record.contextPack === '' ? '(尚无记录)' : record.contextPack.split('\n').slice(-8).join('\n')
   const children = ctx.tasks.children(record.id).filter(child => !child.archived)
@@ -193,7 +207,7 @@ function show(ctx: Context, view: TaskView, now: Date): CommandResult {
       record.holder === undefined ? '持有会话: 无' : `持有会话: ${record.holder}`,
       ...record.blockedReason === undefined ? [] : [`阻塞: ${record.blockedReason.code} — ${record.blockedReason.message}`],
       ...record.wakeRule === undefined ? [] : [`定时唤醒: ${describeWake(record.wakeRule)}`],
-      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(child => lineOf(child, effectiveIdle(ctx.tasks, child, now))).join('\n')}`],
+      ...children.length === 0 ? [] : [`子任务 (${children.length}):\n${children.map(child => lineOf(child, effectiveIdle(ctx.tasks, child, now, holderActivity))).join('\n')}`],
       `上下文包(尾部 8 行):\n${pack}`,
     ].join('\n'),
   }
@@ -414,11 +428,12 @@ async function run(ctx: Context, config: Config, rawInput: string): Promise<Comm
       if (projects.length === 0) return { kind: 'success', text: '还没有项目;/task project create <名> 建一个' }
       const counts = new Map<string, number>()
       const idles = new Map<string, number>()
+      const holderActivity = holderActivityOf(ctx)
       for (const view of ctx.tasks.list({})) {
         const id = view.record.projectId
         if (id === undefined) continue
         counts.set(id, (counts.get(id) ?? 0) + 1)
-        if (isOpen(view)) idles.set(id, Math.max(idles.get(id) ?? 0, effectiveIdle(ctx.tasks, view, now)))
+        if (isOpen(view)) idles.set(id, Math.max(idles.get(id) ?? 0, effectiveIdle(ctx.tasks, view, now, holderActivity)))
       }
       return {
         kind: 'success',

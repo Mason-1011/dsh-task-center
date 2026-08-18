@@ -1,6 +1,10 @@
 # Web-board composition: the seam plus its RPC face, nothing else. The board
-# service is a pure projection over ctx.tasks — no sessions, commands, or
-# resident plugins, so the spec drives the ledger directly.
+# service is a projection over ctx.tasks joined with the live holder sessions
+# (idle freshness), so the session store rides along; no commands or resident
+# plugins, and the spec drives the ledger directly.
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+
 - id: tasks
   name: '@task-center/task'
   config:

@@ -7,7 +7,7 @@
 | `task/task` | 定义件(Service) | `ctx.tasks`:状态机转换、项目(§1.2 of 05)、contextPack 读写、`task/*` 与 `project/*` 事件 |
 | `task/task-local` | Provider | 经 `ctx.storageDomain.open(taskDomainSpec)` 开域;后端由配置路由(json/sqlite) |
 | `task/tool-task` | Consumer(模型) | `task_create(可带父/项目) / task_claim / task_update / task_report / task_patrol(巡检观察:不认领不改状态不刷新闲置) / task_query(可按父查子/按项目收窄) / task_projects` 七工具 + 提示词段 |
-| `task/command-task` + `client/ui-task` | Consumer(人类) | `/task` 命令(面板按项目两级分组,标闲置天数、最久搁置 ≥ staleDays 置顶 ⚠,闲置为子树感知口径)+ `/task project` 建改归档 + `/task candidates`/`promote`/`ignore` 候选看管;Web 面板(全景/过滤/阻塞置顶/待验收队列/待确认候选列/跳转会话) |
+| `task/command-task` + `client/ui-task` | Consumer(人类) | `/task` 命令(面板按项目两级分组,标闲置天数、最久搁置 ≥ staleDays 置顶 ⚠,闲置为子树感知口径且与持有会话活事件取 max——会话在动即不闲,零账本写入)+ `/task project` 建改归档 + `/task candidates`/`promote`/`ignore` 候选看管;Web 面板(全景/过滤/阻塞置顶/待验收队列/待确认候选列/跳转会话) |
 | `task/task-wake` | Provider(时间) | 宿主级定时器:到点起新会话干活(见 §2)+ 每日巡检(`patrol.at` 到点起一个观察会话刷新各未完结任务现状) |
 | `task/task-quota` | Provider(额度) | 观察 `llm/stream` 会话失败,QUOTA 即挂起并释放持有;重置点经 task-wake 唤醒续做 |
 | `task/task-reaper` | Provider(存活) | 会话处置事件 + 挂载清扫,system actor 释放死持有(崩溃恢复) |

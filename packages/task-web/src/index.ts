@@ -10,8 +10,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { CandidateId, ProjectId, TaskId, effectiveIdle } from '@task-center/task'
-import type { TaskMutation, TaskView } from '@task-center/task'
+import { CandidateId, ProjectId, TaskId, effectiveIdle, lastSessionActivity } from '@task-center/task'
+import type { HolderActivity, TaskMutation, TaskView } from '@task-center/task'
 import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, ShowResult, TaskCard } from './wire.ts'
 
 export type * from './wire.ts'
@@ -43,8 +43,8 @@ const ACTIONS: Readonly<Record<string, (reason: string) => Exclude<TaskMutation,
  * returns JSON-safe values — optional facts are omitted keys, never undefined.
  */
 export class TaskBoardService extends TypertRemoteService {
-  /** The board is a pure projection over the task seam. */
-  static inject = ['tasks']
+  /** The board projects over the task seam, joined with live holder sessions for idle freshness. */
+  static inject = ['tasks', 'sessions']
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'task-board')
@@ -57,6 +57,16 @@ export class TaskBoardService extends TypertRemoteService {
   /** Idle days at which the ⚠ banner appears; validated at construction. */
   private readonly staleDays: number
 
+  /**
+   * Live holder-session activity for the display idle join: a holder session
+   * at work keeps its card fresh with zero ledger writes; sessions not live
+   * in this process fall back to the ledger's `workedAt`.
+   */
+  private readonly holderActivity: HolderActivity = sessionId => {
+    const session = this.ctx.sessions.get(sessionId)
+    return session === undefined ? undefined : lastSessionActivity(session.events)
+  }
+
   /** One task view as one wire card; optional facts are omitted, not nulled. */
   private card(view: TaskView, now: Date): TaskCard {
     const record = view.record
@@ -67,7 +77,7 @@ export class TaskBoardService extends TypertRemoteService {
       acceptance: record.acceptance,
       status: record.status,
       archived: view.archived,
-      idleDays: effectiveIdle(this.ctx.tasks, view, now),
+      idleDays: effectiveIdle(this.ctx.tasks, view, now, this.holderActivity),
       subtaskCount: record.subtasks.length,
       ...record.holder === undefined ? {} : { holder: record.holder },
       ...record.projectId === undefined ? {} : { projectId: record.projectId },
@@ -121,7 +131,7 @@ export class TaskBoardService extends TypertRemoteService {
     let worstIdle = -1
     for (const view of views) {
       if (view.archived || view.record.status === 'done') continue
-      const idle = effectiveIdle(this.ctx.tasks, view, now)
+      const idle = effectiveIdle(this.ctx.tasks, view, now, this.holderActivity)
       if (idle > worstIdle) {
         worstIdle = idle
         worst = view
@@ -155,7 +165,7 @@ export class TaskBoardService extends TypertRemoteService {
       objective: child.record.objective,
       status: child.record.status,
       archived: child.archived,
-      idleDays: effectiveIdle(this.ctx.tasks, child, now),
+      idleDays: effectiveIdle(this.ctx.tasks, child, now, this.holderActivity),
     }))
     const packTail = view.record.contextPack === ''
       ? ''

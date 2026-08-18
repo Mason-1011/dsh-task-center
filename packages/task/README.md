@@ -9,7 +9,12 @@ Service Definition(`ctx.tasks`)。所有其他 task-center 包的依赖根。
 - `src/types.ts`:词汇类型(品牌化 id、状态、动词、双账本事件元数据)与品牌工厂
 - `src/fold.ts`:纯状态机——`TRANSITIONS` 转换表、`applyMutation` 守卫(权限矩阵、持有者检查、有界 contextPack)、`applyCandidateMutation` 候选守卫、回放折叠(损坏流即抛错;`workedAt` 从事件流推导,patrol 与唤醒簿记不刷新它)
 - `src/store.ts`:`TaskStore` 端口(append 异步、先落盘后通知)+ 内存默认实现
+- `src/idle.ts`:闲置口径纯函数——`idleDays`(距 workedAt 的整天数)、`effectiveIdle`(子树感知 + 持有会话活跃度连接)、`lastSessionActivity`(会话日志最后活动,跳过 `session/end-seed` 账面标记)
 - `src/index.ts`:`TaskService`——CAS 变更、域事件先行、会话回执(`task/change` / `task/context-injected`)后写、活事件(`task/changed` / `project/changed` / `candidate/changed`)在提交点后派发
+
+## 闲置口径(idle.ts)
+
+`effectiveIdle(reader, view, now, holderActivity?)`:每条记录的触点取 `max(台账 workedAt, 持有会话最后事件时间)`——持有会话在动 = 这条线没被搁下,零账本写入、不撞 CAS(设计稿 06 §7 第一层)。`holderActivity` 是可选连接器:给会话 id 返回其最后事件时间,会话不在进程内(已死/未启动)返回 undefined 即退回 workedAt,连接只会更新鲜、永不变陈。子树感知不变:任一后代(不论状态)有更近触点,父任务就不闲。
 
 ## 候选(第三族实体)
 
