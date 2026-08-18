@@ -265,6 +265,8 @@ export interface ExtractionSource {
   readonly id: SessionId
   /** The complete session log, in seq order. */
   readonly events: readonly SessionEvent[]
+  /** The session's working directory, when known; anchors the summarizer session. */
+  readonly cwd?: string
 }
 
 /** What one session's structural extraction left for the summarizer tier. */
@@ -275,6 +277,17 @@ export interface SummaryRequest {
   readonly lastSeq: number
   /** Rendered conversation lines, newest last, at most the configured window. */
   readonly transcript: readonly string[]
+  /** The source session's working directory, when known; anchors the summarizer session. */
+  readonly cwd?: string
+}
+
+/** A live session as an extraction source, carrying its working directory. */
+function fromSession(session: Session): ExtractionSource {
+  return {
+    id: session.id,
+    events: session.events,
+    ...session.header.cwd === undefined ? {} : { cwd: session.header.cwd },
+  }
 }
 
 /**
@@ -403,6 +416,7 @@ export async function extractSession(ctx: Context, session: ExtractionSource, tr
         sessionId: session.id,
         lastSeq: session.events.at(-1)?.seq ?? -1,
         transcript: lines.slice(-transcriptEvents),
+        ...session.cwd === undefined ? {} : { cwd: session.cwd },
       }
     }
   }
@@ -521,6 +535,12 @@ export async function summarize(ctx: Context, config: Config, request: SummaryRe
   ]
   const handle = await ctx.agents.create({
     sessionId: SessionId(`summary-${request.sessionId}-${request.lastSeq}`),
+    // Deployment assemblies render the `cwd` prompt variable in their persona
+    // section; a machinery session without a cwd fails its first turn before
+    // any model call. Anchor to the summarized conversation's own working
+    // directory when known, else the process's — the summarizer only emits a
+    // JSON verdict, so the anchor's exact value is presentation.
+    meta: { cwd: request.cwd ?? process.cwd() },
     agentOptions: config.agent,
   })
   // A broken route does not reject `whenIdle` — the loop contains the failure
@@ -1031,7 +1051,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    * of the mark and re-opens the session on its own.
    */
   const structuralPass = async (session: Session): Promise<void> => {
-    if (await extractSession(ctx, session, config.transcriptEvents) !== undefined) return
+    if (await extractSession(ctx, fromSession(session), config.transcriptEvents) !== undefined) return
     const mark = watermarks.get(session.id) ?? seed(session)
     watermarks.set(session.id, mark)
     if (mark.extractedThrough < mark.lastSeq) {
@@ -1095,7 +1115,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await settleWindow(session, session.events.at(-1)?.seq ?? 0, undefined)
       settledThrough.delete(session.id)
       const { seq: covered } = lastActivity(session.events)
-      const request = await extractSession(ctx, session, config.transcriptEvents)
+      const request = await extractSession(ctx, fromSession(session), config.transcriptEvents)
       if (request === undefined) {
         persistMark(session.id, covered)
         return
@@ -1142,7 +1162,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (mark.extractedThrough >= mark.lastSeq) continue
       if (now - mark.lastEventTime < idleMs) continue
       const covered = mark.lastSeq
-      const request = await extractSession(ctx, session, config.transcriptEvents)
+      const request = await extractSession(ctx, fromSession(session), config.transcriptEvents)
       if (request === undefined) {
         mark.extractedThrough = covered
         persistMark(session.id, covered)
@@ -1189,7 +1209,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const { seq: lastSeq, time: lastEventTime } = lastActivity(inspection.events)
       if (marks.covered(header.id) >= lastSeq) continue
       extracted++
-      const request = await extractSession(ctx, { id: header.id, events: inspection.events }, config.transcriptEvents)
+      const request = await extractSession(ctx, {
+        id: header.id,
+        events: inspection.events,
+        ...header.cwd === undefined ? {} : { cwd: header.cwd },
+      }, config.transcriptEvents)
       if (request === undefined) {
         persistMark(header.id, lastSeq)
         continue

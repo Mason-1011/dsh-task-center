@@ -136,7 +136,11 @@ export function runPatrol(ctx: Context, config: Config): Promise<void> | undefin
       `  最近记录: ${last}`,
     ].join('\n')
   }).join('\n')
-  const agent = ctx.agentLoop.create(SessionId(`patrol-${localDay(new Date())}-${Date.now()}`), config.agent)
+  // Deployment assemblies render the `cwd` prompt variable in their persona
+  // section; a machinery session without a cwd fails its first turn before any
+  // model call. Tasks carry no directory of their own, so the process's is the
+  // anchor — the inventory text, not the directory, is the patrol's subject.
+  const agent = ctx.agentLoop.create(SessionId(`patrol-${localDay(new Date())}-${Date.now()}`), config.agent, { cwd: process.cwd() })
   const idle = agent.whenIdle()
   agent.followup(createUserMessage({
     content: [{ type: 'text', text: patrolMessage(inventory) }],
@@ -204,7 +208,8 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const fire = (record: TaskRecord): void => {
-    const agent = ctx.agentLoop.create(SessionId(`wake-${record.id.slice(0, 8)}-${Date.now()}`), config.agent)
+    // Same persona-variable constraint as the patrol session; see runPatrol.
+    const agent = ctx.agentLoop.create(SessionId(`wake-${record.id.slice(0, 8)}-${Date.now()}`), config.agent, { cwd: process.cwd() })
     const idle = agent.whenIdle()
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: injection(record) }],

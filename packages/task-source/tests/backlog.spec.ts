@@ -113,7 +113,7 @@ async function bootAuthor(root: string): Promise<{ ctx: Context; fibers: Fiber[]
 }
 
 /** Extractor context: the full production stack — storage, persistence, spine, ledger. */
-async function bootExtractor(sessionsRoot: string, marksRoot: string): Promise<{ ctx: Context; fibers: Fiber[] }> {
+async function bootExtractor(sessionsRoot: string, marksRoot: string, persona?: string): Promise<{ ctx: Context; fibers: Fiber[] }> {
   const ctx = new Context()
   const fibers = [
     await ctx.plugin(Storage),
@@ -121,7 +121,7 @@ async function bootExtractor(sessionsRoot: string, marksRoot: string): Promise<{
     await ctx.plugin(StorageDomain, { backend: 'json', routes: {} }),
     await ctx.plugin(LlmRuntime),
     await ctx.plugin(SessionStore),
-    await ctx.plugin(SystemPrompt, {}),
+    await ctx.plugin(SystemPrompt, persona === undefined ? {} : { persona }),
     await ctx.plugin(ToolRuntime, {}),
     await ctx.plugin(AgentRegistry),
     await ctx.plugin(AgentLoop, { agents: [] }),
@@ -138,8 +138,8 @@ async function shutdown(fibers: Fiber[]): Promise<void> {
 }
 
 /** Store one session's history under the author context, then release it. */
-async function storeSession(author: { ctx: Context }, id: string, events: readonly SessionEvent[]): Promise<void> {
-  author.ctx.sessions.create(SessionId(id), { seed: events })
+async function storeSession(author: { ctx: Context }, id: string, events: readonly SessionEvent[], meta?: { cwd?: string }): Promise<void> {
+  author.ctx.sessions.create(SessionId(id), { seed: events, ...meta === undefined ? {} : { meta } })
   // The write path batches; give it a beat before anything reads the files.
   await new Promise(resolve => setTimeout(resolve, 100))
 }
@@ -335,6 +335,51 @@ describe('fresh-install history sweep', () => {
     adapter.failing = false
     await until(() => extractor.ctx.tasks.candidates().length === 1)
     expect(attempts()).toBe(observed + 1)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(extractor.fibers)
+  })
+
+  it('anchors the summarizer session to the source session\'s cwd when the persona renders {{cwd}}', { timeout: 8_000 }, async () => {
+    // Deployment assemblies render {{cwd}} in the persona section; a machinery
+    // session minted without a cwd fails its first turn before any model call,
+    // so the summarizer never judges anything. The machinery session must carry
+    // the summarized conversation's own working directory.
+    /** Adapter that also captures every text the route saw, prompts included. */
+    class CapturingAdapter extends VerdictAdapter {
+      readonly seenTexts: string[] = []
+
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        if (options.system !== undefined) this.seenTexts.push(options.system)
+        for (const message of options.messages) {
+          for (const block of message.content) {
+            if (block.type === 'text') this.seenTexts.push(block.text)
+          }
+        }
+        yield* super.stream(options)
+      }
+    }
+
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const now = Date.now()
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-chat-old', renumber([
+      userMessage('以后有空把首屏优化一下,现在先不管', now - 4 * HOUR),
+      assistantMessage('好的,先记下这件事。', now - 4 * HOUR + 1),
+    ]), { cwd: sessionsRoot })
+    await shutdown(author.fibers)
+
+    const extractor = await bootExtractor(sessionsRoot, marksRoot, '你在 {{cwd}} 里工作。')
+    const adapter = new CapturingAdapter(TASK_VERDICT)
+    extractor.ctx.llm.registerAdapter(['summary-route'], adapter)
+    await extractor.ctx.plugin(TaskSource, sourceConfig('summary-route'))
+
+    // The summarizer completes: the persona rendered, the verdict birthed a
+    // candidate — before the cwd anchor, this run failed and backed off forever.
+    await until(() => extractor.ctx.tasks.candidates().length === 1)
+    const persona = adapter.seenTexts.find(text => text.includes('你在') && text.includes('里工作'))
+    expect(persona).toContain(sessionsRoot)
     await new Promise(resolve => setTimeout(resolve, 200))
     await shutdown(extractor.fibers)
   })

@@ -4,7 +4,7 @@
 
 ## Model Experience
 
-**被拉起的会话是普通模型 actor**:首条用户消息(`[task-wake]` 前缀)携带目标、验收、状态与 contextPack 全文,指示其 `task_claim` → 完成 → `task_report(review)` 提交。该消息落在会话日志里(注入物可从日志重建)。
+**被拉起的会话是普通模型 actor**:首条用户消息(`[task-wake]` 前缀)携带目标、验收、状态与 contextPack 全文,指示其 `task_claim` → 完成 → `task_report(review)` 提交。该消息落在会话日志里(注入物可从日志重建)。会话创建时携带 cwd(任务没有自己的目录,锚定进程目录)——部署组装的 persona 段渲染 `{{cwd}}`,无 cwd 的机器会话首回合即组装失败(2026-08-18 部署验证发现的真 bug)。
 
 **唤醒 actor 只做机械簿记**:wake-set(推进 every 锚点)/ wake-clear(消费一次性规则)在**起会话之前**提交——崩溃不会双重触发;claim / progress / submit 等工作动词一概不碰(权限矩阵:定时器列全空)。
 
