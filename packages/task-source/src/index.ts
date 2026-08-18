@@ -14,33 +14,48 @@
  * shadows of one piece of work. A session where no structural tier spoke at
  * all falls to the summarizer tier: one model session judges the three
  * necessary conditions against the conversation, quota-probed and per-tick
- * capped. The same skeleton also reflows progress: each turn a holding
+ * capped. Machinery sessions (the summarizer's own, task-wake's fired and
+ * patrol sessions) are never extraction sources: their transcripts are
+ * prompts this family wrote, and their work already reaches the ledger
+ * through reflow and patrol notes. The same skeleton also reflows progress: each turn a holding
  * session closes with todo or goal evidence writes one `progress` line into
  * every task it holds, so the ledger learns what the conversation did
  * without waiting for the model to report it — and a goal entering `blocked`
  * (non-quota) or `complete` mirrors into the held tasks' state: the ledger's
  * status follows the goal the conversation already recorded.
- * Spec: docs/design/06-extraction.md §4–§7.
+ * At boot a history sweep reads every stored session through the persistence
+ * backend — not only the live ones — so a fresh install recovers the whole
+ * backlog at once: structural tiers birth immediately (model-free), chat-only
+ * history queues behind the same idle gate and per-tick cap. Durable marks
+ * (the plugin's own storage domain) record what each session's extraction
+ * already covered, so a restart re-reads no covered ground and re-pays no
+ * summarizer run.
+ * Spec: docs/design/06-extraction.md §4–§8.
  * @module @task-center/task-source
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only: carries the Context.agentLoop augmentation into src-only builds
-// (the emit path cannot lean on test files importing the module).
-import type AgentLoop from '@deepseek-ai/dsh-agent-loop'
+// Type-only: carries the agent subject event declarations (`agent/error`)
+// into src-only builds; the listener never touches a runtime export.
+import type {} from '@deepseek-ai/dsh-agent'
 import type { GoalChangeMeta, GoalPhase } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, TodoItem, UserMessage } from '@deepseek-ai/dsh-session'
+// Type-only: carries the `sessionPersistence` service augmentation into the
+// build program; the sweep reads it optionally through `ctx.get`.
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 // Type-only: carries the `tasks` service augmentation into the build program.
 import type { TaskActor } from '@task-center/task'
+import { memoryMarks, openMarks } from './marks.ts'
+import type { Marks } from './marks.ts'
 
 /** Cordis plugin name. */
 export const name = 'task-source'
 
-/** The task seam, the session store, the agent factory, and the model-call service must be present. */
-export const inject = ['tasks', 'sessions', 'agentLoop', 'llm']
+/** The task seam, the session store, the agent registry (owned summarizer handles), and the model-call service must be present. */
+export const inject = ['tasks', 'sessions', 'agents', 'llm']
 
 /** Deployment knobs for the extractor (no hardcoded tunables). */
 export interface Config {
@@ -228,6 +243,30 @@ export function foldTodos(events: readonly SessionEvent[]): TodoFact | undefined
   }
 }
 
+/** Session id prefixes this plugin family mints for its own machinery sessions. */
+const MACHINERY_PREFIXES = ['summary-', 'wake-', 'patrol-'] as const
+
+/**
+ * Whether one session id names machinery rather than a human conversation:
+ * the summarizer's own sessions (`summary-`, minted here) and task-wake's
+ * fired and patrol sessions (`wake-`/`patrol-`, minted by `@task-center/task-wake`).
+ * Their transcripts are prompts this family wrote — extracting candidates
+ * from them would feed the extractor its own output, and the work they did
+ * already reaches the ledger through reflow and patrol notes.
+ * @param id - one session id.
+ */
+export function isMachinerySession(id: SessionId): boolean {
+  return MACHINERY_PREFIXES.some(prefix => id.startsWith(prefix))
+}
+
+/** What extraction reads from one session: identity plus the ordered log. `Session` satisfies this structurally. */
+export interface ExtractionSource {
+  /** Session identity; doubles as the candidate origin's session and the mark key. */
+  readonly id: SessionId
+  /** The complete session log, in seq order. */
+  readonly events: readonly SessionEvent[]
+}
+
 /** What one session's structural extraction left for the summarizer tier. */
 export interface SummaryRequest {
   /** The session the transcript came from; also the candidate origin's session. */
@@ -267,13 +306,14 @@ function conversationLines(events: readonly SessionEvent[]): string[] {
  * goal, an all-completed todo table) retires that tier's pending candidates
  * whenever it appears. The structural pass itself is model-free; a session
  * where no structural tier spoke at all yields a summary request instead, and
- * the caller owns the model spend.
+ * the caller owns the model spend. Machinery sessions yield nothing at all.
  * @param ctx - Context carrying `tasks`.
  * @param session - the session whose log is read.
  * @param transcriptEvents - the conversation window handed to the summarizer.
  * @returns the summary request when the conversation is the only record, else undefined.
  */
-export async function extractSession(ctx: Context, session: Session, transcriptEvents: number): Promise<SummaryRequest | undefined> {
+export async function extractSession(ctx: Context, session: ExtractionSource, transcriptEvents: number): Promise<SummaryRequest | undefined> {
+  if (isMachinerySession(session.id)) return undefined
   const logger = ctx.logger('task-source')
   const source: TaskActor = { kind: 'source' }
 
@@ -449,17 +489,22 @@ function lastAssistantText(session: Session): string {
 /**
  * Run the summarizer tier for one summary request: a fresh agent session on
  * the configured route judges the conversation, and its verdict births or
- * retires the session's single summary-tier candidate. The fixed origin key
+ * retires the session's single summary-tier candidate. The judgment is
+ * one-shot, so the agent is disposed the moment its final text is read — a
+ * summarizer session never lingers in the registry. The fixed origin key
  * `summary` keeps one candidate per session across re-summarizations — a
  * later `none` verdict on new activity retires the pending one; a task
- * verdict never re-births over any status. A failed session or an unparsable
- * verdict births nothing (宁缺毋滥) — the caller advances regardless, so one
- * activity burst costs at most one summarizer run.
- * @param ctx - Context carrying `tasks`, `agentLoop`, and `llm`.
+ * verdict never re-births over any status. A session that never completes
+ * (a broken route) reports `'failed'` so the caller may retry later without
+ * covering the session; a completed-but-unparsable verdict births nothing
+ * (宁缺毋滥) and reports `'done'` — one activity burst costs at most one
+ * summarizer run.
+ * @param ctx - Context carrying `tasks`, `agents`, and `llm`.
  * @param config - the summarizer route.
  * @param request - the session summary extraction yielded.
+ * @returns `'done'` when the session completed (verdict or not), `'failed'` when it never ran to completion.
  */
-export async function summarize(ctx: Context, config: Config, request: SummaryRequest): Promise<void> {
+export async function summarize(ctx: Context, config: Config, request: SummaryRequest): Promise<'done' | 'failed'> {
   const logger = ctx.logger('task-source')
   const source: TaskActor = { kind: 'source' }
   const origin = { sessionId: request.sessionId, tier: 'summary' as const, key: 'summary' }
@@ -474,38 +519,61 @@ export async function summarize(ctx: Context, config: Config, request: SummaryRe
     ...ctx.tasks.list({ limit: Number.MAX_SAFE_INTEGER }).map(view => view.record.objective),
     ...ctx.tasks.candidates().map(view => view.record.objective),
   ]
-  const agent = ctx.agentLoop.create(
-    SessionId(`summary-${request.sessionId}-${request.lastSeq}`),
-    config.agent,
-  )
-  const idle = agent.whenIdle()
-  agent.followup(createUserMessage({
-    content: [{ type: 'text', text: buildSummaryPrompt(request, objectives) }],
-    source: { kind: 'user' },
-  }))
+  const handle = await ctx.agents.create({
+    sessionId: SessionId(`summary-${request.sessionId}-${request.lastSeq}`),
+    agentOptions: config.agent,
+  })
+  // A broken route does not reject `whenIdle` — the loop contains the failure
+  // at its driver boundary and reports it as `agent/error`. Watch the event
+  // for this agent, so a session that never produced an answer is a failure
+  // the caller retries, not a verdict-less `done` that covers the session.
+  let sessionFailed: unknown
+  const offError = ctx.on('agent/error', payload => {
+    if (payload.agent === handle.agent && sessionFailed === undefined) sessionFailed = payload.error
+  })
+  let finalText: string
   try {
-    await idle
-  } catch (error) {
-    logger.warn('summary session failed', { sessionId: request.sessionId, error })
-    return
+    const idle = handle.agent.whenIdle()
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: buildSummaryPrompt(request, objectives) }],
+      source: { kind: 'user' },
+    }))
+    try {
+      await idle
+    } catch (error) {
+      logger.warn('summary session failed', { sessionId: request.sessionId, error })
+      return 'failed'
+    }
+    if (sessionFailed !== undefined) {
+      logger.warn('summary session errored', { sessionId: request.sessionId, error: sessionFailed })
+      return 'failed'
+    }
+    finalText = lastAssistantText(handle.agent.session)
+  } finally {
+    offError()
+    // The judgment is one-shot: the handle's disposer releases the agent and
+    // its session id the moment the answer is read (or the session dies), so
+    // a leaked registration can neither accumulate across a backlog nor
+    // collide with the retry the same id would mint.
+    await handle.dispose()
   }
 
-  const verdict = parseVerdict(lastAssistantText(agent.session))
+  const verdict = parseVerdict(finalText)
   if (verdict === undefined) {
     logger.warn('summary verdict unparsable', { sessionId: request.sessionId })
-    return
+    return 'done'
   }
   if ('none' in verdict) {
     await retire(`总结判定无任务: ${verdict.none}`)
-    return
+    return 'done'
   }
   // The three conditions gate here too: a blank objective or acceptance is a
   // none the model failed to phrase as one.
   if (verdict.objective.trim() === '' || verdict.acceptance.trim() === '') {
     await retire('总结判定无任务: 验收标准写不出')
-    return
+    return 'done'
   }
-  if (ctx.tasks.candidateByOrigin(origin) !== undefined) return
+  if (ctx.tasks.candidateByOrigin(origin) !== undefined) return 'done'
   const created = await ctx.tasks.candidateCreate({
     objective: verdict.objective,
     acceptance: verdict.acceptance,
@@ -513,6 +581,7 @@ export async function summarize(ctx: Context, config: Config, request: SummaryRe
     origin,
   }, source)
   if ('code' in created) logger.warn('candidate create rejected', { sessionId: request.sessionId, tier: 'summary', code: created.code })
+  return 'done'
 }
 
 /** One todo table's move inside a settled window, by discriminant. */
@@ -766,24 +835,22 @@ interface Watermark {
 }
 
 /**
- * Seed one watermark from a session's current log; an empty log never arms.
- * The `session/end-seed` marker is store bookkeeping stamped at attach time,
- * not session activity — skipping it anchors the idle clock to the last
- * durable event, so a session restored from disk can already be idle at boot.
+ * The last real event of one log: seq -1 and `now` for an empty log. The
+ * `session/end-seed` marker is store bookkeeping stamped at attach time, not
+ * session activity — skipping it anchors the idle clock to the last durable
+ * event, so a session restored from disk can already be idle at boot.
+ * @param events - the complete log, in seq order.
+ * @returns the last activity's seq and epoch-ms time.
  */
-function seed(session: Session): Watermark {
-  let lastSeq = -1
-  let lastEventTime = Number.NaN
-  for (const event of session.events) {
+function lastActivity(events: readonly SessionEvent[]): { seq: number; time: number } {
+  let seq = -1
+  let time = Number.NaN
+  for (const event of events) {
     if (event.type === 'session/end-seed') continue
-    lastSeq = event.seq
-    lastEventTime = event.time
+    seq = event.seq
+    time = event.time
   }
-  return {
-    lastSeq,
-    lastEventTime: Number.isNaN(lastEventTime) ? Date.now() : lastEventTime,
-    extractedThrough: -1,
-  }
+  return { seq, time: Number.isNaN(time) ? Date.now() : time }
 }
 
 /** Outcome of one preflight probe of the summarizer route. */
@@ -796,19 +863,28 @@ interface Probe {
 
 /**
  * Arm the watermark tracker, the immediate structural passes, the idle scan,
- * and progress reflow. Structural evidence (goal set, plan approved, todos
- * written) births at the moment it lands — an explicit declaration of work
- * needs no shelving proof, and the pass is model-free; the boot sweep gives
- * restored histories the same immediacy. The first full scan also runs inside
- * `apply`; later scans run on the timer and only re-extract sessions with
- * activity since their last extraction, gated on silence for the summarizer. A disposed session extracts immediately on the
- * event, not at the next idle gate — disposal is the last chance to read it.
+ * the history sweep, and progress reflow. Structural evidence (goal set,
+ * plan approved, todos written) births at the moment it lands — an explicit
+ * declaration of work needs no shelving proof, and the pass is model-free;
+ * the boot sweep gives restored histories the same immediacy. The first full
+ * scan also runs inside `apply`; later scans run on the timer and only
+ * re-extract sessions with activity since their last extraction, gated on
+ * silence for the summarizer. A detached history sweep then reads every
+ * session the persistence backend stores — not only live ones — so a fresh
+ * install recovers the whole backlog once: covered ground is skipped by the
+ * durable marks, structural tiers birth model-free, and chat-only history
+ * queues behind the same idle gate. A disposed session extracts immediately
+ * on the event, not at the next idle gate — disposal is the last chance to
+ * read it.
  * Summary requests pay one model call each: every run is preceded by a quota
  * probe of the route (a positive QUOTA answer defers the request to a later
  * tick) and counts against the per-tick cap; a live session that gets
  * deferred keeps its watermark behind so the next tick retries, while a
- * request whose session was disposed first is queued — the tick is its only
- * remaining carrier. Progress reflow rides the same stream: every `turn/end`
+ * request whose carrier is not the live scan (disposed session, history
+ * sweep) is queued — the tick is its only remaining carrier. A route whose
+ * sessions never complete backs off exponentially (doubling per consecutive
+ * failure, capped at 32 polls) and covers nothing: configure the route and
+ * the backlog flows. Progress reflow rides the same stream: every `turn/end`
  * settles its window's todo/goal evidence into the closing session's held
  * tasks (a decisive goal transition mirrors into their state), and a disposed
  * session gets one final flush of the turn it died in.
@@ -834,9 +910,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const logger = ctx.logger('task-source')
   const idleMs = config.idleHours * 3_600_000
   const watermarks = new Map<SessionId, Watermark>()
-  /** Summary requests whose session was disposed before they could run; ticks drain them. */
-  const orphaned: SummaryRequest[] = []
+  // Durable marks when a storage-domain facility is mounted (the deployed
+  // composition always mounts one); an in-memory fallback keeps tests and
+  // minimal compositions working, at the price of re-reading ground after a
+  // restart. `ctx.get`, not `inject`: a missing inject service would silently
+  // defer this whole plugin.
+  const storageFacility = ctx.get('storageDomain')
+  const opened = storageFacility === undefined ? undefined : await openMarks(storageFacility)
+  if (opened !== undefined) {
+    ctx.effect(() => () => void opened.close().catch(error => logger.warn('marks close failed', { error })))
+  }
+  const marks: Marks = opened?.marks ?? memoryMarks()
+  const persistMark = (sessionId: SessionId, seq: number): void => {
+    void marks.advance(sessionId, seq).catch(error => logger.warn('mark write failed', { sessionId, error }))
+  }
+  /** Seed one session's watermark from its log plus the durable mark. */
+  const seed = (session: Session): Watermark => {
+    const { seq, time } = lastActivity(session.events)
+    return { lastSeq: seq, lastEventTime: time, extractedThrough: marks.covered(session.id) }
+  }
+  /**
+   * Summary requests the live scan no longer carries: their session was
+   * disposed, or they came from the history sweep. `readyAt` applies the idle
+   * gate's own anchor — a disposed session is ready now, swept history is
+   * ready once its last event has been idle long enough. Ticks drain it.
+   */
+  interface PendingSummary {
+    readonly request: SummaryRequest
+    readonly readyAt: number
+  }
+  const queue: PendingSummary[] = []
   let probeHoldUntil = 0
+  /** Consecutive summarizer failures; each failure doubles the hold, capped. */
+  let failureStreak = 0
 
   /**
    * One minimal request (no session identity) asking whether the route's quota
@@ -872,9 +978,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   /**
    * Spend one summarizer run on a request, probe-gated. The summarize call
-   * itself contains its failures; only the quota wall reports back.
+   * itself contains its failures; a failed session (broken route, no key)
+   * backs off exponentially — each consecutive failure doubles the hold from
+   * one poll interval, capped at 32 — and never covers the session, so fixing
+   * the route lets the backlog flow. A completed run, verdict or not, clears
+   * the streak; only the quota wall reports back without a failure.
    */
-  const runSummary = async (request: SummaryRequest): Promise<'ran' | 'walled'> => {
+  const runSummary = async (request: SummaryRequest): Promise<'ran' | 'walled' | 'failed'> => {
     if (Date.now() < probeHoldUntil) return 'walled'
     const probed = await probe()
     if (probed.walled) {
@@ -882,7 +992,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       logger.info('summary deferred: route still quota-exhausted', { sessionId: request.sessionId })
       return 'walled'
     }
-    await summarize(ctx, config, request)
+    if (await summarize(ctx, config, request) === 'failed') {
+      failureStreak++
+      probeHoldUntil = Date.now() + Math.min(2 ** failureStreak, 32) * config.pollSeconds * 1000
+      logger.warn('summary failed; backing off', { sessionId: request.sessionId, streak: failureStreak })
+      return 'failed'
+    }
+    failureStreak = 0
     return 'ran'
   }
 
@@ -906,12 +1022,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   /**
    * One immediate structural pass. It births and retires structural-tier
    * candidates the moment their evidence lands; a returned summary request
-   * (no structural tier spoke) is ignored — the idle gate and disposal own
-   * the summarizer, so immediate passes never pay for a model call. Watermarks
-   * stay put: the idle tick still re-reads the session for its own accounting.
+   * (no structural tier spoke) is ignored — the idle gate, disposal, and the
+   * history sweep own the summarizer, so immediate passes never pay for a
+   * model call. A session the pass resolved without a request (a structural
+   * tier spoke, or nothing human was ever said) is covered through its tail:
+   * the summarizer would have nothing to add to that stretch, so neither the
+   * idle tick nor a restart re-reads it. Later activity moves `lastSeq` ahead
+   * of the mark and re-opens the session on its own.
    */
   const structuralPass = async (session: Session): Promise<void> => {
-    await extractSession(ctx, session, config.transcriptEvents)
+    if (await extractSession(ctx, session, config.transcriptEvents) !== undefined) return
+    const mark = watermarks.get(session.id) ?? seed(session)
+    watermarks.set(session.id, mark)
+    if (mark.extractedThrough < mark.lastSeq) {
+      mark.extractedThrough = mark.lastSeq
+      persistMark(session.id, mark.lastSeq)
+    }
   }
 
   /**
@@ -956,17 +1082,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   ctx.on('session/disposed', session => {
     watermarks.delete(session.id)
+    // Purge queued entries for this session: disposal re-reads the whole log,
+    // so a stale queued request (an earlier burst's snapshot) must not be
+    // summarized after the fresher read.
+    for (let index = queue.length - 1; index >= 0; index--) {
+      if (queue[index]!.request.sessionId === session.id) queue.splice(index, 1)
+    }
     void (async () => {
       // Final flush of a turn that never closed: headless one-shot sessions
       // often die mid-turn, and disposal is the last chance to settle. No
       // receipt — the session's log is closed.
       await settleWindow(session, session.events.at(-1)?.seq ?? 0, undefined)
       settledThrough.delete(session.id)
+      const { seq: covered } = lastActivity(session.events)
       const request = await extractSession(ctx, session, config.transcriptEvents)
-      if (request === undefined) return
+      if (request === undefined) {
+        persistMark(session.id, covered)
+        return
+      }
       // Disposal is the last chance to read the session, so the cap does not
-      // apply here; a walled route parks the request for the next tick.
-      if (await runSummary(request) === 'walled') orphaned.push(request)
+      // apply here; a walled or failed route parks the request for the next
+      // tick — the queue is its only remaining carrier.
+      if (await runSummary(request) === 'ran') persistMark(session.id, covered)
+      else queue.push({ request, readyAt: 0 })
     })().catch(error => logger.warn('disposed extraction failed', { sessionId: session.id, error }))
   })
 
@@ -974,14 +1112,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const now = Date.now()
     if (now < probeHoldUntil) return
     let budget = config.summariesPerTick
-    // Disposed requests first: their sessions no longer appear in the scan,
-    // so this queue is their only retry.
-    while (orphaned.length > 0 && budget > 0) {
-      const request = orphaned[0]!
-      if (await runSummary(request) === 'walled') return
-      orphaned.shift()
-      budget--
+    // Queued requests first: their sessions no longer appear in the live scan
+    // (disposed) or never did (history sweep), so this queue is their only
+    // carrier. Not-yet-ready and over-cap entries wait for a later tick; a
+    // session that came back to life returns to the live scan below, and its
+    // queued snapshot is stale.
+    const held: PendingSummary[] = []
+    for (const entry of queue.splice(0)) {
+      if (budget <= 0 || entry.readyAt > now || ctx.sessions.get(entry.request.sessionId) !== undefined) {
+        held.push(entry)
+        continue
+      }
+      const outcome = await runSummary(entry.request)
+      if (outcome === 'ran') {
+        budget--
+        persistMark(entry.request.sessionId, entry.request.lastSeq)
+        continue
+      }
+      // Walled or failed: the hold now covers every later run this tick.
+      held.push(entry)
+      queue.push(...held)
+      return
     }
+    queue.push(...held)
     for (const session of ctx.sessions.list()) {
       const mark = watermarks.get(session.id) ?? seed(session)
       watermarks.set(session.id, mark)
@@ -992,24 +1145,67 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const request = await extractSession(ctx, session, config.transcriptEvents)
       if (request === undefined) {
         mark.extractedThrough = covered
+        persistMark(session.id, covered)
         continue
       }
       // Over-cap sessions defer: the watermark stays behind, so the next tick
       // re-extracts and retries.
       if (budget <= 0) continue
+      const outcome = await runSummary(request)
+      if (outcome !== 'ran') return
       budget--
-      if (await runSummary(request) === 'walled') return
       // Events appended during the awaits stay ahead of the watermark: only
       // the snapshot the extraction actually covered advances it.
       mark.extractedThrough = covered
+      persistMark(session.id, covered)
     }
   }
 
+  /**
+   * The history sweep: read every session the persistence backend stores —
+   * not only the live ones — so a fresh install recovers the whole backlog
+   * once. Skipped: machinery sessions (this family's own transcripts),
+   * subagent children (delegation machinery — their work reaches the ledger
+   * through the parent's receipt), live sessions (the boot structural pass
+   * and the idle scan own them), and ground the durable marks already
+   * covered. A structural resolution covers its session immediately; a
+   * chat-only one queues behind the idle gate anchored to its last stored
+   * event — the same gate the live path applies. The sweep runs detached:
+   * mount must not wait on the whole stored history, and every summary it
+   * queues flows through the tick's cap and probe anyway.
+   */
+  const sweepHistory = async (): Promise<void> => {
+    const persistence = ctx.get('sessionPersistence')
+    if (persistence === undefined) {
+      logger.info('no session persistence backend mounted; skipping the history sweep')
+      return
+    }
+    const headers = await persistence.list()
+    let extracted = 0
+    for (const header of headers) {
+      if (isMachinerySession(header.id) || header.origin === 'subagent') continue
+      if (ctx.sessions.get(header.id) !== undefined) continue
+      const inspection = await persistence.inspect(header.id)
+      const { seq: lastSeq, time: lastEventTime } = lastActivity(inspection.events)
+      if (marks.covered(header.id) >= lastSeq) continue
+      extracted++
+      const request = await extractSession(ctx, { id: header.id, events: inspection.events }, config.transcriptEvents)
+      if (request === undefined) {
+        persistMark(header.id, lastSeq)
+        continue
+      }
+      queue.push({ request, readyAt: lastEventTime + idleMs })
+    }
+    logger.info('history sweep done', { storedSessions: headers.length, extracted })
+  }
+
   // Boot sweep: every live session gets one structural pass — restored
-  // histories birth their candidates without waiting for the idle gate.
+  // histories birth their candidates without waiting for the idle gate —
+  // then the stored history flows in behind it.
   for (const session of ctx.sessions.list()) {
     await structuralPass(session)
   }
+  void sweepHistory().catch(error => logger.warn('history sweep failed', { error }))
   await tick()
   const timer = setInterval(() => void tick().catch(error => logger.warn('tick failed', { error })), config.pollSeconds * 1000)
   ctx.effect(() => () => clearInterval(timer))

@@ -632,11 +632,14 @@ describe('summarizer tier', () => {
     await ctx.plugin(TaskSource, sourceConfig('summary-route', { pollSeconds: 0.05, summariesPerTick: 1 }))
 
     // The awaited boot tick spent its single summary; the second session waits.
-    const summaries = () => ctx.agents.list().filter(agent => agent.session.id.startsWith('summary-'))
-    expect(summaries()).toHaveLength(1)
+    const runs = () => adapter.inputs.filter(text => text.includes('[task-source]'))
+    expect(runs()).toHaveLength(1)
     expect(ctx.tasks.candidates()).toHaveLength(1)
-    await until(() => summaries().length === 2)
+    await until(() => runs().length === 2)
     await until(() => ctx.tasks.candidates().length === 2)
+    // Each summarizer session is disposed once its verdict is read: nothing
+    // lingers in the registry after the run.
+    expect(ctx.agents.list().filter(agent => agent.session.id.startsWith('summary-'))).toHaveLength(0)
   })
 
   it('defers the summary while the route is quota-walled, then runs it', { timeout: 8_000 }, async () => {
