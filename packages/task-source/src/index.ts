@@ -3,8 +3,10 @@
  * session records and births task candidates from work the user already
  * started, so task creation is never a ceremony beside the conversation.
  * The trigger skeleton (per-session watermarks, the idle scan, disposed
- * session immediacy) carries three structural tiers, all model-free reads of
- * the session log: an unfinished goal births a candidate (a finished or
+ * session immediacy, and immediate structural passes — a goal being set, a
+ * plan being approved, or todos being written births at once, while the idle
+ * gate only serves the summarizer's chat-only fallback) carries three
+ * structural tiers, all model-free reads of the session log: an unfinished goal births a candidate (a finished or
  * cleared one retires it), a user-approved plan whose work shows no positive
  * completion evidence births one, and a session with unfinished todos and
  * neither of the above births one anchored to the user's own words. Tier
@@ -191,9 +193,11 @@ function firstLine(text: string): string {
  * Fold one session log's todo tables. Adjacent `todo/write` snapshots are
  * diffed: entries new to a snapshot open a chain anchored to the nearest
  * preceding human message (plugin notices, tool results, and model steering
- * are not human — `source.kind === 'user'` is); the latest snapshot supplies
- * the unfinished entries. The newest chain wins; several chains in one
- * session merge into it (design §10.4).
+ * are not human — `source.kind === 'user'` is); a chain the model opened on
+ * its own initiative, with no human message before it, anchors to the last
+ * assistant text instead — the trace is to whatever produced the todos. The
+ * latest snapshot supplies the unfinished entries. The newest chain wins;
+ * several chains in one session merge into it (design §10.4).
  * @param events - the complete session log, in seq order.
  * @returns the anchor and unfinished entries, or undefined when the session never wrote todos.
  */
@@ -202,12 +206,16 @@ export function foldTodos(events: readonly SessionEvent[]): TodoFact | undefined
   let previous = new Set<string>()
   let anchor: { seq: number; text: string } | null = null
   let lastHuman: { seq: number; text: string } | null = null
+  let lastAssistant: { seq: number; text: string } | null = null
   for (const event of events) {
     if (event.type === 'user/message' && event.data.source.kind === 'user') {
       lastHuman = { seq: event.seq, text: messageText(event.data) }
+    } else if (event.type === 'assistant/message') {
+      const text = event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+      if (text.trim() !== '') lastAssistant = { seq: event.seq, text }
     } else if (event.type === 'todo/write') {
       const entries = event.data.todos
-      if (entries.some(item => !previous.has(item.content))) anchor = lastHuman
+      if (entries.some(item => !previous.has(item.content))) anchor = lastHuman ?? lastAssistant
       previous = new Set(entries.map(item => item.content))
       latest = entries
     }
@@ -727,6 +735,26 @@ export async function mirrorHeldTasks(
   }
 }
 
+/** Call ids of pending `exit_plan_mode` calls, shared by the trigger checks. */
+const exitPlanCalls = new Set<string>()
+
+/**
+ * Whether one session event carries structural extraction signal — the
+ * explicit declarations of work (goal set, plan approved, todos written)
+ * that birth immediately instead of waiting out the idle gate.
+ * @param event - one freshly appended session event.
+ */
+function structuralTrigger(event: SessionEvent): boolean {
+  if (event.type === 'goal/change' || event.type === 'todo/write') return true
+  if (event.type === 'tool/call') {
+    if (event.data.name === EXIT_PLAN_MODE) exitPlanCalls.add(event.data.callId)
+    return false
+  }
+  return event.type === 'tool/result'
+    && event.data.message.content[0] !== undefined
+    && exitPlanCalls.has(event.data.message.content[0].toolCallId)
+}
+
 /** Per-session trigger state: what happened, and what extraction has covered. */
 interface Watermark {
   /** Seq of the newest event seen; moves on every `session/event`. */
@@ -767,11 +795,13 @@ interface Probe {
 }
 
 /**
- * Arm the watermark tracker, the idle scan, and progress reflow. The first
- * scan runs inside `apply` (the boot sweep over every live session — restored
- * histories get their first extraction without waiting a full poll interval);
- * later scans run on the timer and only re-extract sessions with activity
- * since their last extraction. A disposed session extracts immediately on the
+ * Arm the watermark tracker, the immediate structural passes, the idle scan,
+ * and progress reflow. Structural evidence (goal set, plan approved, todos
+ * written) births at the moment it lands — an explicit declaration of work
+ * needs no shelving proof, and the pass is model-free; the boot sweep gives
+ * restored histories the same immediacy. The first full scan also runs inside
+ * `apply`; later scans run on the timer and only re-extract sessions with
+ * activity since their last extraction, gated on silence for the summarizer. A disposed session extracts immediately on the
  * event, not at the next idle gate — disposal is the last chance to read it.
  * Summary requests pay one model call each: every run is preceded by a quota
  * probe of the route (a positive QUOTA answer defers the request to a later
@@ -863,7 +893,26 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       mark.lastSeq = event.seq
       mark.lastEventTime = event.time
     }
+    // Structural signals birth immediately (design §4: the idle gate exists
+    // only for the summarizer's chat-only fallback): a goal being set, a plan
+    // being approved, or todos being written is an explicit declaration of
+    // work — waiting for silence adds nothing, the human promotion is the
+    // noise gate, and the pass itself is model-free.
+    if (structuralTrigger(event)) {
+      void structuralPass(session).catch(error => logger.warn('immediate extraction failed', { sessionId: session.id, error }))
+    }
   })
+
+  /**
+   * One immediate structural pass. It births and retires structural-tier
+   * candidates the moment their evidence lands; a returned summary request
+   * (no structural tier spoke) is ignored — the idle gate and disposal own
+   * the summarizer, so immediate passes never pay for a model call. Watermarks
+   * stay put: the idle tick still re-reads the session for its own accounting.
+   */
+  const structuralPass = async (session: Session): Promise<void> => {
+    await extractSession(ctx, session, config.transcriptEvents)
+  }
 
   /**
    * Window state for progress reflow: the seq evidence last settled through,
@@ -956,6 +1005,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
   }
 
+  // Boot sweep: every live session gets one structural pass — restored
+  // histories birth their candidates without waiting for the idle gate.
+  for (const session of ctx.sessions.list()) {
+    await structuralPass(session)
+  }
   await tick()
   const timer = setInterval(() => void tick().catch(error => logger.warn('tick failed', { error })), config.pollSeconds * 1000)
   ctx.effect(() => () => clearInterval(timer))

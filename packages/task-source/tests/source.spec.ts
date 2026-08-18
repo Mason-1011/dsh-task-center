@@ -231,6 +231,16 @@ describe('foldTodos', () => {
     expect(fact!.unfinished).toHaveLength(1)
   })
 
+  it('anchors a model-initiated chain to the last assistant text when no human spoke', () => {
+    const events = renumber([
+      assistantMessage('我来把这个仓库整理一下', 1_000),
+      todoWrite([{ content: '清理死代码', status: 'pending' }], 2_000),
+    ])
+    const fact = foldTodos(events)
+    expect(fact).toMatchObject({ anchorText: '我来把这个仓库整理一下' })
+    expect(fact!.anchorSeq).toBe(events[0]!.seq)
+  })
+
   it('returns undefined without any write and finishes on an all-completed table', () => {
     expect(foldTodos(renumber([userMessage('随便聊聊', 1_000)]))).toBeUndefined()
     const done = renumber([
@@ -411,34 +421,62 @@ describe('task-source plugin', () => {
     })()).rejects.toThrow('transcriptEvents')
   })
 
-  it('boot-sweeps idle sessions and skips fresh ones', async () => {
+  it('boot-sweeps structural signals regardless of idleness', async () => {
     const ctx = await boot()
     const now = Date.now()
     liveSession(ctx, 's-old', seed([[goal('create', 'g-old', 1, 'active'), now - 4 * HOUR]]))
     liveSession(ctx, 's-fresh', seed([[goal('create', 'g-fresh', 1, 'active'), now]]))
-    // The awaited first tick is the boot sweep: no timer waits involved.
+    // The boot structural sweep births both — an explicit declaration of work
+    // needs no shelving proof; the idle gate only serves chat-only sessions.
     await ctx.plugin(TaskSource, sourceConfig('unused'))
-    expect(sole(ctx).record.origin).toEqual({ sessionId: SessionId('s-old'), tier: 'goal', key: 'g-old' })
+    const origins = ctx.tasks.candidates().map(view => view.record.origin.key)
+    expect(origins).toEqual(['g-old', 'g-fresh'])
   })
 
-  it('waits out the idle window, then re-extracts only on new activity', async () => {
+  it('births the moment a goal lands, and later activity never re-births nor refreshes', async () => {
     const ctx = await boot()
-    const now = Date.now()
-    const session = liveSession(ctx, 's-1', seed([[goal('create', 'g-1', 1, 'active'), now]]))
-    // 0.0003h ≈ 1.1s: fresh at boot, idle shortly after; ticks every 50ms.
-    await ctx.plugin(TaskSource, sourceConfig('unused', { pollSeconds: 0.05, idleHours: 0.0003 }))
-    expect(ctx.tasks.candidates()).toHaveLength(0)
+    await ctx.plugin(TaskSource, sourceConfig('unused', { pollSeconds: 0.05, idleHours: 24 }))
+    // The session appears AFTER mount: an appended goal/change must birth
+    // through the immediate structural pass alone — no idle wait, no disposal.
+    const session = liveSession(ctx, 's-1', renumber([userMessage('开始', Date.now())]))
+    session.append('goal/change', goal('create', 'g-1', 1, 'active'))
     await until(() => ctx.tasks.candidates().length === 1)
     expect(sole(ctx).record.objective).toBe('支持暗色模式')
 
     // New activity re-arms the session, but the same origin never re-births
     // nor updates: v1 dedup leaves the standing candidate untouched.
     session.append('goal/change', goal('block', 'g-1', 2, 'blocked', '支持暗色模式', { code: 'token', message: '颜色令牌未定' }))
-    await until(() => Date.now() - session.events.at(-1)!.time > 1_200)
     await until(() => ctx.tasks.candidates().length > 0)
     const candidate = sole(ctx)
     expect(candidate.record.note).toBe('')
     expect(ctx.tasks.candidates()).toHaveLength(1)
+  })
+
+  it('births a model-initiated todo chain immediately, anchored to the assistant text', async () => {
+    const ctx = await boot()
+    await ctx.plugin(TaskSource, sourceConfig('unused', { idleHours: 24 }))
+    const session = liveSession(ctx, 's-model', renumber([]))
+    session.append('assistant/message', {
+      turn: 1, step: 1,
+      message: { id: MessageId('a-m1'), role: 'assistant', content: [{ type: 'text', text: '我来把这个仓库整理一下' }], source: { kind: 'model', provider: 'mock', model: 'mock-model' } },
+    }, { surfaceOp: 'append' })
+    session.append('todo/write', { todos: [{ content: '清理死代码', status: 'pending' }, { content: '补测试', status: 'pending' }] })
+    await until(() => ctx.tasks.candidates().length === 1)
+    const record = sole(ctx).record
+    expect(record.objective).toBe('我来把这个仓库整理一下')
+    expect(record.origin.tier).toBe('todo')
+    expect(record.note).toBe('- 清理死代码\n- 补测试')
+  })
+
+  it('keeps chat-only sessions quiet: immediate passes never pay the summarizer', async () => {
+    const ctx = await boot()
+    await ctx.plugin(TaskSource, sourceConfig('unused', { idleHours: 24 }))
+    const session = liveSession(ctx, 's-chat', renumber([]))
+    session.append('user/message', createUserMessage({ content: [{ type: 'text', text: '聊聊架构' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(ctx.tasks.candidates()).toHaveLength(0)
+    expect(ctx.sessions.list().some(s => s.id.startsWith('summary-'))).toBe(false)
   })
 
   it('extracts a disposed session immediately, bypassing the idle gate', async () => {
