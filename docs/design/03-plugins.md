@@ -11,7 +11,7 @@
 | `task/task-wake` | Provider(时间) | 宿主级定时器:到点起新会话干活(见 §2)+ 每日巡检(`patrol.at` 到点起一个观察会话刷新各未完结任务现状) |
 | `task/task-quota` | Provider(额度) | 观察 `llm/stream` 会话失败,QUOTA 即挂起并释放持有;重置点经 task-wake 唤醒续做 |
 | `task/task-reaper` | Provider(存活) | 会话处置事件 + 挂载清扫,system actor 释放死持有(崩溃恢复) |
-| `task/task-source` | Provider(抽取) | 常驻扫描器:闲置/处置触发 → fold 会话日志(goal/计划/todo)产候选,无结构信号时起一次总结会话兜底(见 06);进度回流(7a–7c)也住这里 |
+| `task/task-source` | Provider(抽取) | 常驻扫描器:闲置/处置触发 → fold 会话日志(goal/计划/todo)产候选,无结构信号时起一次总结会话兜底(见 06);进度回流第二/三层(回合末差分、goal 相变镜像)也住这里——第一层闲置显示连接是纯展示 join,住 `task/task` 的消费方 |
 | `task/shell` | Consumer(人类·壳) | 一条命令经真实 Loader 组装全部插件(cordis.yml)+ 交互 REPL;斜杠行走命令注册表,普通行进交互会话 |
 
 ## 2. 修正:定时干活不能复用 schedule

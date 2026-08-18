@@ -12,8 +12,11 @@
  * shadows of one piece of work. A session where no structural tier spoke at
  * all falls to the summarizer tier: one model session judges the three
  * necessary conditions against the conversation, quota-probed and per-tick
- * capped.
- * Spec: docs/design/06-extraction.md §4–§6.
+ * capped. The same skeleton also reflows progress: each turn a holding
+ * session closes with todo or goal evidence writes one `progress` line into
+ * every task it holds, so the ledger learns what the conversation did
+ * without waiting for the model to report it.
+ * Spec: docs/design/06-extraction.md §4–§7.
  * @module @task-center/task-source
  */
 
@@ -502,6 +505,134 @@ export async function summarize(ctx: Context, config: Config, request: SummaryRe
   if ('code' in created) logger.warn('candidate create rejected', { sessionId: request.sessionId, tier: 'summary', code: created.code })
 }
 
+/** One todo table's move inside a settled window, by discriminant. */
+export type TodoMove =
+  | { readonly kind: 'add'; readonly content: string; readonly to: TodoItem['status'] }
+  | { readonly kind: 'move'; readonly content: string; readonly from: TodoItem['status']; readonly to: TodoItem['status'] }
+  | { readonly kind: 'remove'; readonly content: string; readonly from: TodoItem['status'] }
+
+/** Progress evidence one settled window of a session log carries (design 06 §7 第二层). */
+export interface TurnEvidence {
+  /** Todo table diff between the window's opening state and its closing state. */
+  readonly todo: readonly TodoMove[]
+  /** Rendered goal-change lines, in log order. */
+  readonly goals: readonly string[]
+}
+
+/**
+ * Fold one window of a session log into reflow evidence. The window is
+ * `(settledThrough, endSeq]` — everything since evidence last settled through
+ * the window's close. The todo diff compares the last table written at or
+ * before the window's open against the last one written inside it: a window
+ * with no `todo/write` moved nothing. Goal changes render per event; a clear
+ * names its objective from any earlier snapshot of the same goal id.
+ * @param events - the complete session log, in seq order.
+ * @param settledThrough - exclusive lower bound; evidence at or before it already reflowed.
+ * @param endSeq - inclusive upper bound of the window.
+ * @returns the window's todo moves and goal lines; both empty means no write.
+ */
+export function foldEvidence(
+  events: readonly SessionEvent[],
+  settledThrough: number,
+  endSeq: number,
+): TurnEvidence {
+  let opened = new Map<string, TodoItem['status']>()
+  let closed: Map<string, TodoItem['status']> | undefined
+  const objectives = new Map<string, string>()
+  const goals: string[] = []
+  const inWindow = (seq: number): boolean => seq > settledThrough && seq <= endSeq
+  for (const event of events) {
+    if (event.type === 'todo/write') {
+      const table = new Map(event.data.todos.map(item => [item.content, item.status]))
+      if (!inWindow(event.seq)) opened = table
+      else closed = table
+    } else if (event.type === 'goal/change') {
+      const change: GoalChangeMeta = event.data
+      if (change.operation !== 'clear') objectives.set(change.goal.id, change.goal.objective)
+      if (!inWindow(event.seq)) continue
+      if (change.operation === 'clear') {
+        goals.push(`goal 已清除: ${objectives.get(change.cleared.id) ?? change.cleared.id}`)
+      } else {
+        const blocked = change.goal.blockedReason === undefined ? ''
+          : `(${change.goal.blockedReason.code}: ${change.goal.blockedReason.message})`
+        goals.push(`goal ${change.goal.objective}: ${change.goal.phase}${blocked}`)
+      }
+    }
+  }
+  if (closed === undefined) return { todo: [], goals }
+  const todo: TodoMove[] = []
+  for (const [content, to] of closed) {
+    const from = opened.get(content)
+    if (from === to) continue
+    todo.push(from === undefined
+      ? { kind: 'add', content, to }
+      : { kind: 'move', content, from, to })
+  }
+  for (const [content, from] of opened) {
+    if (!closed.has(content)) todo.push({ kind: 'remove', content, from })
+  }
+  return { todo, goals }
+}
+
+/**
+ * Render one window's evidence as the progress note line. The `自动回流` prefix
+ * keeps the automatic write distinguishable from the model's own
+ * `task_update` reports in the pack.
+ * @param evidence - one settled window's fold.
+ * @returns the note, or `''` when the window carries no evidence.
+ */
+export function renderEvidence(evidence: TurnEvidence): string {
+  const parts: string[] = []
+  if (evidence.todo.length > 0) {
+    const render = (move: TodoMove): string => {
+      switch (move.kind) {
+        case 'add': return `+ ${move.content}(${move.to})`
+        case 'move': return `${move.content} ${move.from}→${move.to}`
+        case 'remove': return `− ${move.content}`
+      }
+    }
+    parts.push(`todo: ${evidence.todo.map(render).join('; ')}`)
+  }
+  if (evidence.goals.length > 0) parts.push(`goal: ${evidence.goals.join('; ')}`)
+  return parts.length === 0 ? '' : `自动回流 ${parts.join(' | ')}`
+}
+
+/**
+ * Write one settled window's note into every task the session holds — one
+ * `progress` per task, the actor being the holding session itself (the
+ * authority matrix is satisfied structurally). A compare-and-set collision
+ * retries once against the fresh revision; a second failure drops the line —
+ * the next window's diff carries the table forward, so no progress is lost.
+ * Tasks outside `active`/`blocked` (awaiting verdict, finished, archived) are
+ * skipped: the transition table would refuse them anyway.
+ * @param ctx - Context carrying `tasks`.
+ * @param sessionId - the holding session whose evidence this is.
+ * @param note - the rendered evidence line; callers skip the empty case.
+ * @param receipt - the live session to write the `task/change` receipt into; omit for a disposed session.
+ */
+export async function reflowHeldTasks(
+  ctx: Context,
+  sessionId: SessionId,
+  note: string,
+  receipt?: Session,
+): Promise<void> {
+  const logger = ctx.logger('task-source')
+  const actor: TaskActor = { kind: 'model', sessionId }
+  for (const view of ctx.tasks.list({ includeArchived: true })) {
+    const { id, holder, status } = view.record
+    if (view.archived || holder !== sessionId || (status !== 'active' && status !== 'blocked')) continue
+    const mutation = { operation: 'progress' as const, note }
+    let attempted = await ctx.tasks.mutate(id, view.record.revision, mutation, actor, receipt)
+    if ('code' in attempted && attempted.code === 'TASK_STALE_REVISION') {
+      const current = ctx.tasks.get(id)
+      if (current !== undefined) {
+        attempted = await ctx.tasks.mutate(id, current.record.revision, mutation, actor, receipt)
+      }
+    }
+    if ('code' in attempted) logger.warn('reflow dropped', { sessionId, taskId: id, code: attempted.code })
+  }
+}
+
 /** Per-session trigger state: what happened, and what extraction has covered. */
 interface Watermark {
   /** Seq of the newest event seen; moves on every `session/event`. */
@@ -542,18 +673,20 @@ interface Probe {
 }
 
 /**
- * Arm the watermark tracker and the idle scan. The first scan runs inside
- * `apply` (the boot sweep over every live session — restored histories get
- * their first extraction without waiting a full poll interval); later scans
- * run on the timer and only re-extract sessions with activity since their
- * last extraction. A disposed session extracts immediately on the event, not
- * at the next idle gate — disposal is the last chance to read it. Summary
- * requests pay one model call each: every run is preceded by a quota probe of
- * the route (a positive QUOTA answer defers the request to a later tick) and
- * counts against the per-tick cap; a live session that gets deferred keeps
- * its watermark behind so the next tick retries, while a request whose
- * session was disposed first is queued — the tick is its only remaining
- * carrier.
+ * Arm the watermark tracker, the idle scan, and progress reflow. The first
+ * scan runs inside `apply` (the boot sweep over every live session — restored
+ * histories get their first extraction without waiting a full poll interval);
+ * later scans run on the timer and only re-extract sessions with activity
+ * since their last extraction. A disposed session extracts immediately on the
+ * event, not at the next idle gate — disposal is the last chance to read it.
+ * Summary requests pay one model call each: every run is preceded by a quota
+ * probe of the route (a positive QUOTA answer defers the request to a later
+ * tick) and counts against the per-tick cap; a live session that gets
+ * deferred keeps its watermark behind so the next tick retries, while a
+ * request whose session was disposed first is queued — the tick is its only
+ * remaining carrier. Progress reflow rides the same stream: every `turn/end`
+ * settles its window's todo/goal evidence into the closing session's held
+ * tasks, and a disposed session gets one final flush of the turn it died in.
  * @param ctx - Plugin context.
  * @param config - Scan cadence, idle threshold, summarizer route, and caps.
  */
@@ -637,9 +770,51 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
   })
 
+  /**
+   * Window state for progress reflow: the seq evidence last settled through,
+   * per session. Seeded from the last turn that closed strictly before the
+   * window being settled — a turn that ends after mount reflows in full,
+   * including its pre-mount tail (crash-recovery of a reflow this process
+   * missed), while fully historical turns never do.
+   */
+  const settledThrough = new Map<SessionId, number>()
+  const seedSettled = (session: Session, before: number): number => {
+    let last = 0
+    for (const event of session.events) {
+      if (event.type === 'turn/end' && event.seq < before) last = event.seq
+    }
+    settledThrough.set(session.id, last)
+    return last
+  }
+
+  /**
+   * Settle one window's evidence into the held tasks. The mark advances
+   * synchronously before the first await, so back-to-back turns never
+   * double-settle the same window. A dropped write (CAS twice stale, task
+   * moved on) consumes its window: the next window's diff carries the
+   * table forward.
+   */
+  const settleWindow = async (session: Session, endSeq: number, receipt: Session | undefined): Promise<void> => {
+    const mark = settledThrough.get(session.id) ?? seedSettled(session, endSeq)
+    const note = renderEvidence(foldEvidence(session.events, mark, endSeq))
+    settledThrough.set(session.id, endSeq)
+    if (note !== '') await reflowHeldTasks(ctx, session.id, note, receipt)
+  }
+
+  ctx.on('session/event', (session, event) => {
+    if (event.type !== 'turn/end') return
+    void settleWindow(session, event.seq, session)
+      .catch(error => logger.warn('turn reflow failed', { sessionId: session.id, error }))
+  })
+
   ctx.on('session/disposed', session => {
     watermarks.delete(session.id)
     void (async () => {
+      // Final flush of a turn that never closed: headless one-shot sessions
+      // often die mid-turn, and disposal is the last chance to settle. No
+      // receipt — the session's log is closed.
+      await settleWindow(session, session.events.at(-1)?.seq ?? 0, undefined)
+      settledThrough.delete(session.id)
       const request = await extractSession(ctx, session, config.transcriptEvents)
       if (request === undefined) return
       // Disposal is the last chance to read the session, so the cap does not
