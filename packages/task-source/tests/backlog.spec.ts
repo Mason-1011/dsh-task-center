@@ -179,6 +179,27 @@ class VerdictAdapter extends LlmAdapter {
 
 const TASK_VERDICT = '{"objective": "首屏加载时间降到 1 秒以内", "acceptance": "本地刷新后 Lighthouse 性能分 ≥ 90", "note": "用户自己搁置的意图"}'
 
+/** Route whose sessions never complete until `failing` turns off. */
+class FlakyAdapter extends LlmAdapter {
+  failing = true
+  readonly inputs: string[] = []
+
+  providerInfo(provider: string) {
+    return { id: provider, name: `flaky ${provider}` }
+  }
+
+  async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    const text = options.messages.find(message => message.role === 'user')?.content
+      .find(block => block.type === 'text')
+    if (text !== undefined && text.type === 'text') this.inputs.push(text.text)
+    if (this.failing) throw new Error('route not configured')
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'text-delta', index: 0, text: TASK_VERDICT }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: TASK_VERDICT } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
+
 describe('machinery guard', () => {
   it('names exactly the prefixes this family mints', () => {
     for (const id of ['summary-s-1-5', 'wake-abcd12-123', 'patrol-2026-08-18-1']) {
@@ -284,27 +305,6 @@ describe('fresh-install history sweep', () => {
   })
 
   it('backs off a failing route without covering ground, then flows when the route works', { timeout: 12_000 }, async () => {
-    /** Route whose sessions never complete until turned on. */
-    class FlakyAdapter extends LlmAdapter {
-      failing = true
-      readonly inputs: string[] = []
-
-      providerInfo(provider: string) {
-        return { id: provider, name: `flaky ${provider}` }
-      }
-
-      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-        const text = options.messages.find(message => message.role === 'user')?.content
-          .find(block => block.type === 'text')
-        if (text !== undefined && text.type === 'text') this.inputs.push(text.text)
-        if (this.failing) throw new Error('route not configured')
-        yield { type: 'block-start', index: 0, blockType: 'text' }
-        yield { type: 'text-delta', index: 0, text: TASK_VERDICT }
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: TASK_VERDICT } }
-        yield { type: 'finish', reason: { kind: 'stop' } }
-      }
-    }
-
     const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
     const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
     roots.push(sessionsRoot, marksRoot)
@@ -382,5 +382,54 @@ describe('fresh-install history sweep', () => {
     expect(persona).toContain(sessionsRoot)
     await new Promise(resolve => setTimeout(resolve, 200))
     await shutdown(extractor.fibers)
+  })
+
+  it('re-summarizes after a restart with a fresh machinery session despite a stored failed attempt', { timeout: 12_000 }, async () => {
+    // A failed summarizer run persists its machinery session. A deterministic
+    // machinery id reused after a restart collides whenever the stored
+    // artifact's cwd differs from the retry's anchor (persistence rejects the
+    // same id at a different cwd), and the thrown create silently drops the
+    // queued backlog. Every attempt therefore mints a fresh id.
+    const machineryIds = (ctx: Context): string[] => {
+      const ids: string[] = []
+      ctx.on('session/created', session => {
+        if (isMachinerySession(session.id)) ids.push(session.id)
+      })
+      return ids
+    }
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const now = Date.now()
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-chat-old', renumber([
+      userMessage('以后有空把首屏优化一下,现在先不管', now - 4 * HOUR),
+      assistantMessage('好的,先记下这件事。', now - 4 * HOUR + 1),
+    ]))
+    await shutdown(author.fibers)
+
+    // Phase one: the route fails, and the attempt leaves a stored machinery log.
+    const first = await bootExtractor(sessionsRoot, marksRoot)
+    const firstIds = machineryIds(first.ctx)
+    const flaky = new FlakyAdapter()
+    first.ctx.llm.registerAdapter(['summary-route'], flaky)
+    await first.ctx.plugin(TaskSource, sourceConfig('summary-route'))
+    await until(() => flaky.inputs.some(text => text.includes('[task-source]')))
+    expect(firstIds.length).toBeGreaterThanOrEqual(1)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(first.fibers)
+
+    // Phase two: a fresh process over the same roots, route working. The
+    // still-uncovered session summarizes on a machinery id no stored artifact
+    // owns, and the candidate is born.
+    const second = await bootExtractor(sessionsRoot, marksRoot)
+    const secondIds = machineryIds(second.ctx)
+    const adapter = new VerdictAdapter(TASK_VERDICT)
+    second.ctx.llm.registerAdapter(['summary-route'], adapter)
+    await second.ctx.plugin(TaskSource, sourceConfig('summary-route'))
+    await until(() => second.ctx.tasks.candidates().length === 1)
+    expect(secondIds.some(id => firstIds.includes(id))).toBe(false)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(second.fibers)
   })
 })

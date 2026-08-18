@@ -273,7 +273,7 @@ export interface ExtractionSource {
 export interface SummaryRequest {
   /** The session the transcript came from; also the candidate origin's session. */
   readonly sessionId: SessionId
-  /** Seq of the session's last event; the summarizer session id embeds it, so one activity burst summarizes once. */
+  /** Seq of the session's last event; the summarizer session id embeds it for traceability. */
   readonly lastSeq: number
   /** Rendered conversation lines, newest last, at most the configured window. */
   readonly transcript: readonly string[]
@@ -534,7 +534,12 @@ export async function summarize(ctx: Context, config: Config, request: SummaryRe
     ...ctx.tasks.candidates().map(view => view.record.objective),
   ]
   const handle = await ctx.agents.create({
-    sessionId: SessionId(`summary-${request.sessionId}-${request.lastSeq}`),
+    // The id embeds the source session and seq for traceability and ends with
+    // the mint time: persistence rejects a same-id create whose cwd differs
+    // from the stored artifact's, so a deterministic id would collide with
+    // the log a failed attempt left behind (stored at a different anchor than
+    // a later deployment mints) and never retry.
+    sessionId: SessionId(`summary-${request.sessionId}-${request.lastSeq}-${Date.now()}`),
     // Deployment assemblies render the `cwd` prompt variable in their persona
     // section; a machinery session without a cwd fails its first turn before
     // any model call. Anchor to the summarized conversation's own working
@@ -998,11 +1003,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   /**
    * Spend one summarizer run on a request, probe-gated. The summarize call
-   * itself contains its failures; a failed session (broken route, no key)
-   * backs off exponentially — each consecutive failure doubles the hold from
-   * one poll interval, capped at 32 — and never covers the session, so fixing
-   * the route lets the backlog flow. A completed run, verdict or not, clears
-   * the streak; only the quota wall reports back without a failure.
+   * itself contains its failures — a returned `'failed'` and a thrown error
+   * (a session-create collision, a storage failure) are the same outcome —
+   * so a throw escaping here can never drop the caller's queued request. A
+   * failed run (broken route, no key) backs off exponentially — each
+   * consecutive failure doubles the hold from one poll interval, capped at
+   * 32 — and never covers the session, so fixing the route lets the backlog
+   * flow. A completed run, verdict or not, clears the streak; only the quota
+   * wall reports back without a failure.
    */
   const runSummary = async (request: SummaryRequest): Promise<'ran' | 'walled' | 'failed'> => {
     if (Date.now() < probeHoldUntil) return 'walled'
@@ -1012,7 +1020,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       logger.info('summary deferred: route still quota-exhausted', { sessionId: request.sessionId })
       return 'walled'
     }
-    if (await summarize(ctx, config, request) === 'failed') {
+    let outcome: 'done' | 'failed'
+    try {
+      outcome = await summarize(ctx, config, request)
+    } catch (error) {
+      logger.warn('summary threw; treating as failed', { sessionId: request.sessionId, error })
+      outcome = 'failed'
+    }
+    if (outcome === 'failed') {
       failureStreak++
       probeHoldUntil = Date.now() + Math.min(2 ** failureStreak, 32) * config.pollSeconds * 1000
       logger.warn('summary failed; backing off', { sessionId: request.sessionId, streak: failureStreak })
