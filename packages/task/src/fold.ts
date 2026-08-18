@@ -7,6 +7,10 @@
  */
 
 import type {
+  CandidateDomainEvent,
+  CandidateId,
+  CandidateMutation,
+  CandidateRecord,
   ProjectDomainEvent,
   ProjectId,
   ProjectMutation,
@@ -118,6 +122,12 @@ export interface ApplyContext {
  */
 export function applyMutation(record: TaskRecord | undefined, mutation: TaskMutation, context: ApplyContext): TransitionResult {
   const { actor } = context
+  // The source actor is the extractor: it births candidates and mirrors goal
+  // phases, but never works a task itself — progress mirroring attributes to
+  // the holding session, which the authority matrix already covers.
+  if (actor.kind === 'source') {
+    return error('TASK_FORBIDDEN', 'the source actor never works tasks')
+  }
   if (record === undefined) {
     if (mutation.operation !== 'create') return error('TASK_NOT_FOUND', 'task does not exist')
     if (mutation.objective.trim() === '') return error('TASK_INVALID_OBJECTIVE', 'objective must not be empty')
@@ -134,6 +144,7 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       ...mutation.projectId === undefined ? {} : { projectId: mutation.projectId },
       sessionIds: [],
       contextPack: '',
+      ...mutation.origin === undefined ? {} : { origin: mutation.origin },
       subtasks: [],
       createdAt: context.at,
       updatedAt: context.at,
@@ -283,10 +294,11 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
   return { ok: next }
 }
 
-/** Replay fold outcome: both entity families of the ledger. */
+/** Replay fold outcome: every entity family of the ledger. */
 export interface FoldedLedger {
   readonly tasks: ReadonlyMap<TaskId, TaskRecord>
   readonly projects: ReadonlyMap<ProjectId, ProjectRecord>
+  readonly candidates: ReadonlyMap<CandidateId, CandidateRecord>
   readonly archivedTasks: ReadonlySet<TaskId>
 }
 
@@ -325,6 +337,57 @@ export function applyProjectMutation(record: ProjectRecord | undefined, mutation
   return error('PROJECT_ALREADY_EXISTS', 'a project with this id already exists')
 }
 
+/** Guard verdict for candidate mutations, mirroring {@link TransitionResult}. */
+export type CandidateResult = { readonly ok: CandidateRecord } | { readonly error: TaskError }
+
+/**
+ * Apply one candidate mutation (undefined for `candidate-create`). Candidates
+ * have no status machine beyond `pending` → one terminal status: the extractor
+ * (source actor) births and supersedes, humans promote and ignore, and every
+ * verb is legal only while pending.
+ */
+export function applyCandidateMutation(record: CandidateRecord | undefined, mutation: CandidateMutation, context: ApplyContext): CandidateResult {
+  if (record === undefined) {
+    if (mutation.operation !== 'candidate-create') return error('CANDIDATE_NOT_FOUND', 'candidate does not exist')
+    if (context.actor.kind !== 'source') return error('CANDIDATE_FORBIDDEN', 'candidates are born by the source extractor only')
+    if (mutation.objective.trim() === '') return error('CANDIDATE_INVALID_OBJECTIVE', 'objective must not be empty')
+    if (mutation.origin.key.trim() === '') return error('CANDIDATE_INVALID_OBJECTIVE', 'origin key must not be empty')
+    return { ok: {
+      id: mutation.candidateId,
+      revision: 1,
+      status: 'pending',
+      objective: mutation.objective,
+      acceptance: mutation.acceptance !== undefined && mutation.acceptance.trim() !== '' ? mutation.acceptance : '',
+      note: mutation.note ?? '',
+      origin: mutation.origin,
+      createdAt: context.at,
+      updatedAt: context.at,
+    } }
+  }
+  if (mutation.operation === 'candidate-create') {
+    return error('CANDIDATE_ALREADY_EXISTS', 'a candidate with this id already exists')
+  }
+  if (record.status !== 'pending') {
+    return error('CANDIDATE_INVALID_TRANSITION', `candidate is already ${record.status}`)
+  }
+  if (mutation.operation === 'candidate-promote') {
+    if (context.actor.kind !== 'human') return error('CANDIDATE_FORBIDDEN', 'promoting a candidate is human-only')
+    if (mutation.acceptance.trim() === '') {
+      return error('CANDIDATE_INVALID_ACCEPTANCE', 'promotion requires a non-empty acceptance criteria')
+    }
+    const objective = mutation.objective !== undefined && mutation.objective.trim() !== '' ? mutation.objective : record.objective
+    if (objective.trim() === '') return error('CANDIDATE_INVALID_OBJECTIVE', 'objective must not be empty')
+    return { ok: { ...record, revision: record.revision + 1, status: 'promoted', objective, acceptance: mutation.acceptance, promotedTaskId: mutation.taskId, updatedAt: context.at } }
+  }
+  if (mutation.operation === 'candidate-ignore') {
+    if (context.actor.kind !== 'human') return error('CANDIDATE_FORBIDDEN', 'ignoring a candidate is human-only')
+    return { ok: { ...record, revision: record.revision + 1, status: 'ignored', updatedAt: context.at } }
+  }
+  if (mutation.reason.trim() === '') return error('CANDIDATE_INVALID_REASON', 'superseding requires a reason')
+  if (context.actor.kind !== 'source') return error('CANDIDATE_FORBIDDEN', 'superseding is the source extractor\'s verdict')
+  return { ok: { ...record, revision: record.revision + 1, status: 'superseded', updatedAt: context.at } }
+}
+
 /**
  * Fold the authoritative domain event stream — tasks and projects share one
  * ledger. Fails loud on a corrupt stream: a revision gap, an unknown-entity
@@ -332,14 +395,15 @@ export function applyProjectMutation(record: ProjectRecord | undefined, mutation
  * the stream never created. This is the invariant basis — both record families
  * equal this fold over the stream.
  */
-export function fold(events: readonly (TaskDomainEvent | ProjectDomainEvent)[], packByteLimit: number): FoldedLedger {
+export function fold(events: readonly (TaskDomainEvent | ProjectDomainEvent | CandidateDomainEvent)[], packByteLimit: number): FoldedLedger {
   const tasks = new Map<TaskId, TaskRecord>()
   const projects = new Map<ProjectId, ProjectRecord>()
+  const candidates = new Map<CandidateId, CandidateRecord>()
   const archivedTasks = new Set<TaskId>()
-  const lastRevision = new Map<TaskId | ProjectId, number>()
+  const lastRevision = new Map<TaskId | ProjectId | CandidateId, number>()
   for (const event of events) {
     const change = event.change
-    const id = change.kind === 'task/change' ? change.taskId : change.projectId
+    const id = change.kind === 'task/change' ? change.taskId : change.kind === 'candidate/change' ? change.candidateId : change.projectId
     const expected = (lastRevision.get(id) ?? 0) + 1
     if (event.revision !== expected) {
       throw new Error(`corrupt ledger: ${id} revision ${event.revision}, expected ${expected}`)
@@ -356,6 +420,17 @@ export function fold(events: readonly (TaskDomainEvent | ProjectDomainEvent)[], 
       }
       tasks.set(change.taskId, result.ok)
       if (change.operation === 'abandon') archivedTasks.add(change.taskId)
+    } else if (change.kind === 'candidate/change') {
+      const result = applyCandidateMutation(candidates.get(change.candidateId), change.mutation, {
+        actor: event.actor, at: event.at, packByteLimit,
+      })
+      if ('error' in result) {
+        throw new Error(`corrupt ledger: ${change.candidateId} revision ${event.revision}: ${result.error.code}`)
+      }
+      if (result.ok.revision !== event.revision || result.ok.status !== change.candidate.record.status) {
+        throw new Error(`corrupt ledger: ${change.candidateId} revision ${event.revision} disagrees with its view`)
+      }
+      candidates.set(change.candidateId, result.ok)
     } else {
       const result = applyProjectMutation(projects.get(change.projectId), change.mutation, {
         actor: event.actor, at: event.at, packByteLimit,
@@ -378,5 +453,5 @@ export function fold(events: readonly (TaskDomainEvent | ProjectDomainEvent)[], 
       throw new Error(`corrupt ledger: ${task.id} references missing project ${task.projectId}`)
     }
   }
-  return { tasks, projects, archivedTasks }
+  return { tasks, projects, candidates, archivedTasks }
 }

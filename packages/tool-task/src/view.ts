@@ -86,6 +86,16 @@ const TOOL_CODES: Readonly<Record<TaskErrorCode, TaskToolErrorCode>> = {
   PROJECT_INVALID_NAME: 'invalid_project',
   PROJECT_FORBIDDEN: 'forbidden',
   PROJECT_ARCHIVED: 'invalid_project',
+  // Candidate codes carry no tool verb: the model face never operates
+  // candidates, so one reaching a tool is an internal misuse.
+  CANDIDATE_NOT_FOUND: 'internal_error',
+  CANDIDATE_ALREADY_EXISTS: 'internal_error',
+  CANDIDATE_INVALID_OBJECTIVE: 'internal_error',
+  CANDIDATE_INVALID_ACCEPTANCE: 'internal_error',
+  CANDIDATE_INVALID_TRANSITION: 'internal_error',
+  CANDIDATE_FORBIDDEN: 'internal_error',
+  CANDIDATE_DUPLICATE_ORIGIN: 'internal_error',
+  CANDIDATE_INVALID_REASON: 'internal_error',
 }
 
 /** Translate one seam error into the closed tool union. */

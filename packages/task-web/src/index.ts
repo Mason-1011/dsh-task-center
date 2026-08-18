@@ -10,9 +10,9 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { ProjectId, TaskId, effectiveIdle } from '@task-center/task'
+import { CandidateId, ProjectId, TaskId, effectiveIdle } from '@task-center/task'
 import type { TaskMutation, TaskView } from '@task-center/task'
-import type { ActResult, BoardPayload, CreateResult, ShowResult, TaskCard } from './wire.ts'
+import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, ShowResult, TaskCard } from './wire.ts'
 
 export type * from './wire.ts'
 
@@ -80,14 +80,31 @@ export class TaskBoardService extends TypertRemoteService {
 
   /**
    * Full board snapshot: projects with live counts, every task (archived
-   * included — the client dims them), and the stalest open task once its
-   * effective idle crosses {@link TaskBoardService.staleDays}.
+   * included — the client dims them), the 待确认 column of pending candidates
+   * (oldest first), and the stalest open task once its effective idle crosses
+   * {@link TaskBoardService.staleDays}.
    */
   @Remote('board')
   board(): BoardPayload {
     const now = new Date()
     const views = this.ctx.tasks.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
     const tasks = views.map(view => this.card(view, now))
+    const candidates = this.ctx.tasks.candidates()
+      .filter(view => view.record.status === 'pending')
+      .map(view => {
+        const { record } = view
+        return {
+          id: record.id,
+          revision: record.revision,
+          status: record.status,
+          objective: record.objective,
+          note: record.note,
+          tier: record.origin.tier,
+          sessionId: record.origin.sessionId,
+          createdAt: record.createdAt,
+        }
+      })
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     const counts = new Map<string, number>()
     for (const view of views) {
       if (view.archived) continue
@@ -115,6 +132,7 @@ export class TaskBoardService extends TypertRemoteService {
       now: now.toISOString(),
       projects,
       tasks,
+      candidates,
       ...worst !== undefined && worstIdle >= this.staleDays ? { stalest: this.card(worst, now) } : {},
     }
   }
@@ -187,6 +205,38 @@ export class TaskBoardService extends TypertRemoteService {
     }, { kind: 'human' })
     if ('code' in created) return { ok: false, code: created.code, message: created.message }
     return { ok: true, id: created.task.record.id, revision: created.task.record.revision }
+  }
+
+  /**
+   * Promote one pending candidate into a task as the human actor. The
+   * acceptance is written here and only here — the extractor cannot know how
+   * the human will judge done; an optional objective override corrects a noisy
+   * extraction.
+   */
+  @Remote('promote')
+  async promote(candidateId: string, expectedRevision: number, acceptance: string, objective: string | undefined): Promise<PromoteResult> {
+    const trimmedAcceptance = (acceptance ?? '').trim()
+    if (trimmedAcceptance === '') {
+      return { ok: false, code: 'CANDIDATE_INVALID_ACCEPTANCE', message: '验收标准不能为空 —— 候选抽不出验收,这一段由人补' }
+    }
+    const trimmedObjective = (objective ?? '').trim()
+    const promoted = await this.ctx.tasks.candidatePromote(CandidateId(candidateId), expectedRevision, {
+      acceptance: trimmedAcceptance,
+      ...trimmedObjective === '' ? {} : { objective: trimmedObjective },
+    }, { kind: 'human' })
+    if ('code' in promoted) return { ok: false, code: promoted.code, message: promoted.message }
+    return { ok: true, taskId: promoted.task.record.id }
+  }
+
+  /**
+   * Ignore one pending candidate as the human actor: terminal for that origin
+   * — the same source will not re-birth it.
+   */
+  @Remote('ignore')
+  async ignore(candidateId: string, expectedRevision: number): Promise<IgnoreResult> {
+    const ignored = await this.ctx.tasks.candidateIgnore(CandidateId(candidateId), expectedRevision, { kind: 'human' })
+    if ('code' in ignored) return { ok: false, code: ignored.code, message: ignored.message }
+    return { ok: true }
   }
 }
 

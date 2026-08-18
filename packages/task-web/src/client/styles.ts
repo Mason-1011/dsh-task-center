@@ -126,6 +126,11 @@ const CSS = `
 .task-web-card:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .task-web-card[data-status='blocked'] { border-color: var(--dsw-alias-state-error-primary); }
 .task-web-card[data-archived='true'] { opacity: .55; }
+/* ── the 待确认 inbox: pre-task cards, dashed like a draft column ── */
+.task-web-candidates { flex: 0 0 232px; }
+.task-web-candidate { border-style: dashed; cursor: default; }
+.task-web-candidate:hover { background: var(--dsw-alias-bg-layer-1); }
+.task-web-promote { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .task-web-card-meta {
   display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
   font: var(--dsw-font-xxxs-11); color: var(--dsw-alias-label-tertiary);

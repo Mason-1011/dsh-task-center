@@ -22,6 +22,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TaskCard, TaskStatus } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
+import { CandidateCardView } from './CandidateCard.tsx'
 import { CreateForm } from './CreateForm.tsx'
 import { DetailPopover } from './DetailPopover.tsx'
 import { STATUS_DOT, STATUS_LABEL } from './status.ts'
@@ -156,6 +157,22 @@ export function BoardOverlay(props: { connection: ConnectionService }) {
         )}
 
         <div className="task-web-cols">
+          {/* The 待确认 inbox rides outside project filters: candidates have
+              no project until a human promotes them. */}
+          <div className="task-web-col task-web-candidates">
+            <div className="task-web-col-head">
+              <span>待确认</span>
+              <span className="task-web-col-count">{payload?.candidates.length ?? 0}</span>
+            </div>
+            <div className="task-web-cards">
+              {(payload?.candidates.length ?? 0) === 0 && (
+                <div className="task-web-col-empty">暂无候选;闲置会话里未完结的 goal 会自动出现在这里</div>
+              )}
+              {payload?.candidates.map(card => (
+                <CandidateCardView key={card.id} connection={props.connection} card={card} />
+              ))}
+            </div>
+          </div>
           {COLUMNS.map(column => {
             const cards = visible.filter(card => card.status === column.status)
             const dot = STATUS_DOT[column.status]

@@ -49,6 +49,18 @@ export function ProjectId(id: string): ProjectId {
   return id as ProjectId
 }
 
+/** Stable candidate identity, unique within the task domain ledger. */
+export type CandidateId = Branded<'CandidateId'>
+
+/**
+ * Brand a string as a {@link CandidateId}.
+ * @param id - the raw candidate id string.
+ * @returns the same string, branded (a compile-time cast — no runtime cost).
+ */
+export function CandidateId(id: string): CandidateId {
+  return id as CandidateId
+}
+
 /** State-changing verbs. Closed union; see the transition table in fold.ts. */
 export type TaskOperation =
   | 'create'
@@ -79,9 +91,15 @@ export type WakeRule =
   | { readonly kind: 'at'; readonly scheduledAt: string }
   | { readonly kind: 'every'; readonly everySeconds: number; readonly anchorAt: string }
 
+/** Where a promoted task was born: the candidate and the session whose records produced it. */
+export interface TaskOrigin {
+  readonly candidateId: CandidateId
+  readonly sessionId: SessionId
+}
+
 /** One mutation request. Discriminated union over the operation verbs. */
 export type TaskMutation =
-  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspaceIds?: readonly string[] }
+  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspaceIds?: readonly string[]; readonly origin?: TaskOrigin }
   | { readonly operation: 'edit'; readonly objective?: string; readonly acceptance?: string; readonly projectId?: ProjectId | null }
   | { readonly operation: 'claim' }
   | { readonly operation: 'progress'; readonly note: string; readonly next?: string }
@@ -112,6 +130,8 @@ export interface TaskRecord {
   readonly projectId?: ProjectId
   readonly sessionIds: readonly SessionId[]
   readonly contextPack: string
+  /** Birth provenance: set when the task was promoted from an extracted candidate. */
+  readonly origin?: TaskOrigin
   readonly wakeRule?: WakeRule
   readonly subtasks: readonly TaskId[]
   readonly createdAt: string
@@ -138,6 +158,7 @@ export type TaskActor =
   | { readonly kind: 'human' }
   | { readonly kind: 'wake' }
   | { readonly kind: 'system' }
+  | { readonly kind: 'source' }
 
 /** Snapshot-style session-event receipt for a session's model-initiated change (05 §2). */
 export interface TaskSnapshotChangeMeta {
@@ -215,6 +236,73 @@ export interface ProjectDomainEvent {
   readonly change: ProjectSnapshotChangeMeta
 }
 
+/** Candidate lifecycle: pending until a human promotes or ignores it, or the source finishes the work. */
+export type CandidateStatus = 'pending' | 'promoted' | 'ignored' | 'superseded'
+
+/**
+ * Which extractor tier produced a candidate and from which session. `key` is
+ * stable per source record (goal id, plan exit, todo anchor, summary verdict),
+ * so a re-trigger of the same source deduplicates on it.
+ */
+export interface CandidateOrigin {
+  readonly sessionId: SessionId
+  readonly tier: 'goal' | 'plan' | 'todo' | 'summary'
+  readonly key: string
+}
+
+/** Durable candidate state, derived by folding the same domain event stream. */
+export interface CandidateRecord {
+  readonly id: CandidateId
+  readonly revision: number
+  readonly status: CandidateStatus
+  readonly objective: string
+  /** Acceptance draft; goal/plan/todo tiers leave it for the promoting human. */
+  readonly acceptance: string
+  /** Provenance note: blocker, unfinished todos, plan body. */
+  readonly note: string
+  readonly origin: CandidateOrigin
+  /** The task this candidate became at promote time. */
+  readonly promotedTaskId?: TaskId
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/** Read-only candidate projection served by `ctx.tasks`. */
+export interface CandidateView {
+  readonly record: CandidateRecord
+}
+
+/** State-changing candidate verbs. Closed union; `pending` is the only live status. */
+export type CandidateOperation = 'candidate-create' | 'candidate-promote' | 'candidate-ignore' | 'candidate-supersede'
+
+/** One candidate mutation request. */
+export type CandidateMutation =
+  | { readonly operation: 'candidate-create'; readonly candidateId: CandidateId; readonly objective: string; readonly acceptance?: string; readonly note?: string; readonly origin: CandidateOrigin }
+  | { readonly operation: 'candidate-promote'; readonly acceptance: string; readonly objective?: string; readonly taskId: TaskId }
+  | { readonly operation: 'candidate-ignore' }
+  | { readonly operation: 'candidate-supersede'; readonly reason: string }
+
+/** Snapshot-style receipt for one committed candidate change. */
+export interface CandidateSnapshotChangeMeta {
+  readonly kind: 'candidate/change'
+  readonly version: 1
+  readonly operation: CandidateOperation
+  readonly candidateId: CandidateId
+  readonly revision: number
+  readonly mutation: CandidateMutation
+  readonly candidate: CandidateView
+}
+
+/** Authoritative candidate-domain event; shares the ledger and stream with tasks and projects. */
+export interface CandidateDomainEvent {
+  readonly eventId: TaskEventId
+  readonly candidateId: CandidateId
+  readonly revision: number
+  readonly actor: TaskActor
+  readonly at: string
+  readonly change: CandidateSnapshotChangeMeta
+}
+
 /** Stable error codes for rejected task reads and mutations (05 §1). */
 export type TaskErrorCode =
   | 'TASK_NOT_FOUND'
@@ -238,6 +326,14 @@ export type TaskErrorCode =
   | 'PROJECT_INVALID_NAME'
   | 'PROJECT_FORBIDDEN'
   | 'PROJECT_ARCHIVED'
+  | 'CANDIDATE_NOT_FOUND'
+  | 'CANDIDATE_ALREADY_EXISTS'
+  | 'CANDIDATE_INVALID_OBJECTIVE'
+  | 'CANDIDATE_INVALID_ACCEPTANCE'
+  | 'CANDIDATE_INVALID_TRANSITION'
+  | 'CANDIDATE_FORBIDDEN'
+  | 'CANDIDATE_DUPLICATE_ORIGIN'
+  | 'CANDIDATE_INVALID_REASON'
 
 /** Task service error carrying one stable code. */
 export interface TaskError {

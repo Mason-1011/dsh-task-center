@@ -8,7 +8,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import type { ActResult, BoardPayload, CreateResult, ShowResult } from '../wire.ts'
+import type { ActResult, BoardPayload, CreateResult, IgnoreResult, PromoteResult, ShowResult } from '../wire.ts'
 import { callApi } from './api.ts'
 import type { ConnectionService } from './context.ts'
 
@@ -129,6 +129,23 @@ export const boardStore = {
   /** Detail fetch for one card (no cache — opened rarely, freshness wins). */
   show: (connection: ConnectionService, taskId: string): Promise<ShowResult> =>
     callApi<ShowResult>(connection, 'show', { taskId }),
+  /** Promote one pending candidate; success triggers a refetch. */
+  promote: async (
+    connection: ConnectionService, candidateId: string, expectedRevision: number,
+    acceptance: string, objective: string | undefined,
+  ): Promise<PromoteResult> => {
+    const result = await callApi<PromoteResult>(connection, 'promote', { candidateId, expectedRevision, acceptance, objective })
+    if (result.ok !== false) await refresh(connection)
+    return result
+  },
+  /** Ignore one pending candidate; success triggers a refetch. */
+  ignore: async (
+    connection: ConnectionService, candidateId: string, expectedRevision: number,
+  ): Promise<IgnoreResult> => {
+    const result = await callApi<IgnoreResult>(connection, 'ignore', { candidateId, expectedRevision })
+    if (result.ok !== false) await refresh(connection)
+    return result
+  },
   /** Dismiss the ephemeral notice (the Toast's onDone). */
   clearNotice: (): void => { setState({ notice: undefined }) },
 }

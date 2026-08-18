@@ -11,13 +11,16 @@
 import { z } from 'zod'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import type { ProjectDomainEvent, ProjectId, TaskDomainEvent, TaskEventId, TaskId, TaskOperation } from '@task-center/task'
+import type { CandidateDomainEvent, CandidateId, CandidateOperation, ProjectDomainEvent, ProjectId, TaskDomainEvent, TaskEventId, TaskId, TaskOperation } from '@task-center/task'
 
 /** TaskId schema at the durable boundary; branding has no runtime representation. */
 const taskId = z.string().transform(value => value as TaskId)
 
 /** ProjectId schema at the durable boundary. */
 const projectId = z.string().transform(value => value as ProjectId)
+
+/** CandidateId schema at the durable boundary. */
+const candidateId = z.string().transform(value => value as CandidateId)
 
 /** EventId schema at the durable boundary. */
 const eventId = z.string().transform(value => value as TaskEventId)
@@ -28,6 +31,7 @@ const actor = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('human') }),
   z.object({ kind: z.literal('wake') }),
   z.object({ kind: z.literal('system') }),
+  z.object({ kind: z.literal('source') }),
 ])
 
 /** The closed task operation set; the fold enforces each verb's transition rules. */
@@ -39,6 +43,9 @@ const taskOperation = z.enum([
 
 /** The closed project operation set. */
 const projectOperation = z.enum(['project-create', 'project-rename', 'project-archive'])
+
+/** The closed candidate operation set. */
+const candidateOperation = z.enum(['candidate-create', 'candidate-promote', 'candidate-ignore', 'candidate-supersede'] satisfies [CandidateOperation, ...CandidateOperation[]])
 
 /**
  * Durable envelope of one stored task event. `mutation` and `task` stay opaque
@@ -79,16 +86,34 @@ const storedProjectEvent = z.object({
   }),
 }).transform(event => event as unknown as ProjectDomainEvent)
 
-/** Either family of the shared ledger, discriminated by its change kind. */
-export const storedLedgerEvent = z.union([storedTaskEvent, storedProjectEvent])
+/** Durable envelope of one stored candidate event, opaque the same way. */
+const storedCandidateEvent = z.object({
+  eventId,
+  candidateId,
+  revision: z.number().int().positive(),
+  actor,
+  at: z.string(),
+  change: z.object({
+    kind: z.literal('candidate/change'),
+    version: z.literal(1),
+    operation: candidateOperation,
+    candidateId,
+    revision: z.number().int().positive(),
+    mutation: z.record(z.string(), z.unknown()),
+    candidate: z.record(z.string(), z.unknown()),
+  }),
+}).transform(event => event as unknown as CandidateDomainEvent)
+
+/** Any family of the shared ledger, discriminated by its change kind. */
+export const storedLedgerEvent = z.union([storedTaskEvent, storedProjectEvent, storedCandidateEvent])
 
 /**
  * The task domain spec: one `events` table carrying the append-only stream of
- * both families. The KV key is the fixed-width append sequence (stream order);
+ * all families. The KV key is the fixed-width append sequence (stream order);
  * the opaque `eventId` lives inside the record.
  */
 export const taskDomainSpec = defineDomain({
   name: 'task',
   version: 1,
-  tables: { events: domainTable<string, TaskDomainEvent | ProjectDomainEvent>(storedLedgerEvent) },
+  tables: { events: domainTable<string, TaskDomainEvent | ProjectDomainEvent | CandidateDomainEvent>(storedLedgerEvent) },
 })

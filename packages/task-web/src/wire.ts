@@ -6,9 +6,9 @@
  * @module @task-center/task-web/wire
  */
 
-import type { TaskStatus } from '@task-center/task'
+import type { CandidateStatus, TaskStatus } from '@task-center/task'
 
-export type { TaskStatus } from '@task-center/task'
+export type { CandidateStatus, TaskStatus } from '@task-center/task'
 
 /** Human-triggered card action; each maps onto one seam mutation. */
 export type BoardAction = 'approve' | 'reject' | 'block' | 'release' | 'abandon'
@@ -52,8 +52,28 @@ export interface BoardPayload {
   readonly now: string
   readonly projects: readonly ProjectChip[]
   readonly tasks: readonly TaskCard[]
+  /** The 待确认 column: pending candidates, oldest first. */
+  readonly candidates: readonly CandidateCard[]
   /** The ⚠ banner card; omitted when no open task is stale enough. */
   readonly stalest?: TaskCard
+}
+
+/**
+ * One extraction candidate card: work the source extractor found in an idle
+ * session, waiting for the human verdict (晋升 with an acceptance, or 忽略).
+ */
+export interface CandidateCard {
+  readonly id: string
+  readonly revision: number
+  readonly status: CandidateStatus
+  readonly objective: string
+  /** Extractor note (e.g. the goal's blocker); empty string when none. */
+  readonly note: string
+  /** Which dsh record family the candidate came from. */
+  readonly tier: 'goal' | 'plan' | 'todo' | 'summary'
+  /** The session the candidate was extracted from. */
+  readonly sessionId: string
+  readonly createdAt: string
 }
 
 /** One child row inside the detail view. */
@@ -94,4 +114,14 @@ export type ActResult =
 /** `create` success carries the new identity. */
 export type CreateResult =
   | { readonly ok: true; readonly id: string; readonly revision: number }
+  | RpcError
+
+/** `promote` success carries the born task's id. */
+export type PromoteResult =
+  | { readonly ok: true; readonly taskId: string }
+  | RpcError
+
+/** `ignore` outcome. */
+export type IgnoreResult =
+  | { readonly ok: true }
   | RpcError

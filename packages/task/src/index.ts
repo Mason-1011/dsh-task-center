@@ -9,11 +9,17 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
-import { applyMutation, applyProjectMutation, fold } from './fold.ts'
+import { applyCandidateMutation, applyMutation, applyProjectMutation, fold } from './fold.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
-import { ProjectId, TaskId } from './types.ts'
+import { CandidateId, ProjectId, TaskId } from './types.ts'
 import type {
+  CandidateDomainEvent,
+  CandidateMutation,
+  CandidateOperation,
+  CandidateOrigin,
+  CandidateSnapshotChangeMeta,
+  CandidateView,
   ProjectDomainEvent,
   ProjectMutation,
   ProjectOperation,
@@ -24,6 +30,7 @@ import type {
   TaskError,
   TaskMutation,
   TaskOperation,
+  TaskOrigin,
   TaskRecord,
   TaskSnapshotChangeMeta,
   TaskStatus,
@@ -32,7 +39,7 @@ import type {
 } from './types.ts'
 
 export * from './types.ts'
-export { fold, applyMutation, applyProjectMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
+export { fold, applyMutation, applyProjectMutation, applyCandidateMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
 export { idleDays, effectiveIdle } from './idle.ts'
 export type { TaskReader } from './idle.ts'
 export { MemoryTaskStore } from './store.ts'
@@ -64,6 +71,12 @@ export interface ProjectChanged {
   readonly project: ProjectView
 }
 
+/** Live notification after one candidate event commits; candidates share the ledger. */
+export interface CandidateChanged {
+  readonly operation: CandidateOperation
+  readonly candidate: CandidateView
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
@@ -81,6 +94,13 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'project/changed'(payload: ProjectChanged): void
+    /**
+     * Candidate mutation committed to the shared ledger, right after its task twin.
+     * @param payload.operation - candidate verb that committed.
+     * @param payload.candidate - fresh view of the mutated candidate.
+     * @mode emit
+     */
+    'candidate/changed'(payload: CandidateChanged): void
   }
 }
 
@@ -185,13 +205,14 @@ export class TaskService extends Service {
    * Create one task. The handle's disposer abandons the task (legal only
    * before the first claim, which withdrawal enforces by error).
    */
-  async create(input: { objective: string; acceptance: string; projectId?: ProjectId; workspaceIds?: readonly string[] }, actor: TaskActor): Promise<TaskHandle | TaskError> {
+  async create(input: { objective: string; acceptance: string; projectId?: ProjectId; workspaceIds?: readonly string[]; origin?: TaskOrigin }, actor: TaskActor): Promise<TaskHandle | TaskError> {
     const taskId = TaskId(randomUUID())
     const view = await this.commit(taskId, {
       operation: 'create', taskId,
       objective: input.objective, acceptance: input.acceptance,
       ...input.projectId === undefined ? {} : { projectId: input.projectId },
       ...input.workspaceIds === undefined ? {} : { workspaceIds: input.workspaceIds },
+      ...input.origin === undefined ? {} : { origin: input.origin },
     }, actor)
     if ('code' in view) return view
     const claimed = view.record.revision
@@ -228,6 +249,116 @@ export class TaskService extends Service {
       return { code: 'TASK_STALE_REVISION', message: `expected revision ${current.record.revision}` }
     }
     return this.commitProject(projectId, mutation, actor)
+  }
+
+  /** All candidates in creation order, terminal statuses included. */
+  candidates(): readonly CandidateView[] {
+    const { candidates } = fold(this.store.events(), this.config.contextPackByteLimit)
+    return [...candidates.values()].map(record => ({ record }))
+  }
+
+  /** The candidate of one exact origin, for extractor dedup. */
+  candidateByOrigin(origin: CandidateOrigin): CandidateView | undefined {
+    return this.candidates().find(view =>
+      view.record.origin.sessionId === origin.sessionId
+      && view.record.origin.tier === origin.tier
+      && view.record.origin.key === origin.key)
+  }
+
+  /**
+   * Birth one candidate (source extractor only). Same-origin dedup: a
+   * candidate from this exact origin already exists in any status — the
+   * extractor's re-trigger finds it here and does not double-create.
+   */
+  async candidateCreate(input: { objective: string; acceptance?: string; note?: string; origin: CandidateOrigin }, actor: TaskActor): Promise<CandidateView | TaskError> {
+    if (actor.kind !== 'source') return { code: 'CANDIDATE_FORBIDDEN', message: 'candidates are born by the source extractor only' }
+    if (this.candidateByOrigin(input.origin) !== undefined) {
+      return { code: 'CANDIDATE_DUPLICATE_ORIGIN', message: 'a candidate from this origin already exists' }
+    }
+    const candidateId = CandidateId(randomUUID())
+    return this.commitCandidate(candidateId, {
+      operation: 'candidate-create', candidateId,
+      objective: input.objective,
+      ...input.acceptance === undefined ? {} : { acceptance: input.acceptance },
+      ...input.note === undefined ? {} : { note: input.note },
+      origin: input.origin,
+    }, actor)
+  }
+
+  /**
+   * Promote one pending candidate into a task (human only): creates the task
+   * with the candidate as origin, then marks the candidate promoted with the
+   * task id. Task-first ordering keeps the crash window recoverable — a task
+   * with this origin blocks re-promotion instead of duplicating.
+   */
+  async candidatePromote(candidateId: CandidateId, expectedRevision: number, input: { acceptance: string; objective?: string; projectId?: ProjectId }, actor: TaskActor): Promise<{ task: TaskView; candidate: CandidateView } | TaskError> {
+    const candidates = this.candidates()
+    const current = candidates.find(view => view.record.id === candidateId)
+    if (current === undefined) return { code: 'CANDIDATE_NOT_FOUND', message: 'candidate does not exist' }
+    if (current.record.revision !== expectedRevision) {
+      return { code: 'TASK_STALE_REVISION', message: `expected revision ${current.record.revision}` }
+    }
+    // Crash recovery: the task commit below landed but the promote commit did not.
+    const promoted = this.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
+      .find(view => view.record.origin?.candidateId === candidateId)
+    if (promoted !== undefined) {
+      return { code: 'CANDIDATE_ALREADY_EXISTS', message: `candidate was already promoted as task ${promoted.record.id}` }
+    }
+    const objective = input.objective !== undefined && input.objective.trim() !== '' ? input.objective : current.record.objective
+    const origin: TaskOrigin = { candidateId, sessionId: current.record.origin.sessionId }
+    const taskId = TaskId(randomUUID())
+    const task = await this.commit(taskId, {
+      operation: 'create', taskId,
+      objective, acceptance: input.acceptance,
+      ...input.projectId === undefined ? {} : { projectId: input.projectId },
+      origin,
+    }, actor)
+    if ('code' in task) return task
+    const candidate = await this.commitCandidate(candidateId, {
+      operation: 'candidate-promote', acceptance: input.acceptance, taskId: task.record.id,
+      ...input.objective === undefined ? {} : { objective: input.objective },
+    }, actor)
+    if ('code' in candidate) return candidate
+    return { task, candidate }
+  }
+
+  /** Ignore one pending candidate (human only); terminal. */
+  async candidateIgnore(candidateId: CandidateId, expectedRevision: number, actor: TaskActor): Promise<CandidateView | TaskError> {
+    return this.candidateMutate(candidateId, expectedRevision, { operation: 'candidate-ignore' }, actor)
+  }
+
+  /** Supersede one pending candidate (source only): the origin finished the work; terminal. */
+  async candidateSupersede(candidateId: CandidateId, expectedRevision: number, reason: string, actor: TaskActor): Promise<CandidateView | TaskError> {
+    return this.candidateMutate(candidateId, expectedRevision, { operation: 'candidate-supersede', reason }, actor)
+  }
+
+  /** CAS fence shared by ignore and supersede. */
+  private async candidateMutate(candidateId: CandidateId, expectedRevision: number, mutation: Exclude<CandidateMutation, { operation: 'candidate-create' | 'candidate-promote' }>, actor: TaskActor): Promise<CandidateView | TaskError> {
+    const current = this.candidates().find(view => view.record.id === candidateId)
+    if (current === undefined) return { code: 'CANDIDATE_NOT_FOUND', message: 'candidate does not exist' }
+    if (current.record.revision !== expectedRevision) {
+      return { code: 'TASK_STALE_REVISION', message: `expected revision ${current.record.revision}` }
+    }
+    return this.commitCandidate(candidateId, mutation, actor)
+  }
+
+  /** Validate and append one candidate event to the shared ledger, then emit. */
+  private async commitCandidate(candidateId: CandidateId, mutation: CandidateMutation, actor: TaskActor): Promise<CandidateView | TaskError> {
+    const at = new Date().toISOString()
+    const { candidates } = fold(this.store.events(), this.config.contextPackByteLimit)
+    const result = applyCandidateMutation(candidates.get(candidateId), mutation, {
+      actor, at, packByteLimit: this.config.contextPackByteLimit,
+    })
+    if ('error' in result) return result.error
+    const view: CandidateView = { record: result.ok }
+    const change: CandidateSnapshotChangeMeta = {
+      kind: 'candidate/change', version: 1,
+      operation: mutation.operation, candidateId, revision: result.ok.revision, mutation, candidate: view,
+    }
+    const event: Omit<CandidateDomainEvent, 'eventId'> = { candidateId, revision: result.ok.revision, actor, at, change }
+    await this.store.append(event)
+    this.ctx.emit('candidate/changed', { operation: mutation.operation, candidate: view })
+    return view
   }
 
   /** Register `session` as the holder; appends the session to `sessionIds`. */

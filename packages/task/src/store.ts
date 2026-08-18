@@ -1,20 +1,20 @@
 /**
  * The task ledger store port. The seam owns the contract; a provider
  * (`@task-center/task-local`, slice 2) supplies the durable implementation over
- * the dsh storage domain. Tasks and projects share one stream. Stores assign
- * `eventId` on append and resolve only after the event is durable, so the
- * service publishes after commit.
+ * the dsh storage domain. Tasks, projects, and candidates share one stream.
+ * Stores assign `eventId` on append and resolve only after the event is
+ * durable, so the service publishes after commit.
  * @module @task-center/task/store
  */
 
 import { randomUUID } from 'node:crypto'
-import type { ProjectDomainEvent, TaskDomainEvent, TaskEventId, TaskId } from './types.ts'
+import type { CandidateDomainEvent, ProjectDomainEvent, TaskDomainEvent, TaskEventId, TaskId } from './types.ts'
 
 /** One ledger event, minus the store-assigned id. */
-export type LedgerEventInput = Omit<TaskDomainEvent, 'eventId'> | Omit<ProjectDomainEvent, 'eventId'>
+export type LedgerEventInput = Omit<TaskDomainEvent, 'eventId'> | Omit<ProjectDomainEvent, 'eventId'> | Omit<CandidateDomainEvent, 'eventId'>
 
-/** One committed event of either family. */
-export type LedgerEvent = TaskDomainEvent | ProjectDomainEvent
+/** One committed event of any family. */
+export type LedgerEvent = TaskDomainEvent | ProjectDomainEvent | CandidateDomainEvent
 
 /** Append-only access to the authoritative domain event stream. */
 export interface TaskStore {

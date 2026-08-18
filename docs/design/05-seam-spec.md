@@ -57,6 +57,19 @@
 
 任务的 `create`/`edit` 可携带 `projectId`:**键存在且非空即挂入,键存在且为 null 即移出**(edit 专用)。引用完整性双向强制:服务提交层在 append 前校验项目存在且未归档(被拒的挂入不产生任何事件);fold 重放后做悬挂引用检查,任务指向不存在的项目即抛错——账本损坏要炸在明处。
 
+### 1.3 候选:待确认的轻实体族(6a 已实现)
+
+候选与任务、项目共用一条域事件流,同一 fold 聚合返回 `{tasks, projects, archivedTasks, candidates}`。候选没有状态机,只有 `pending` 到三个终态之一的单向转换,**每个动词只在 pending 时合法**:
+
+| 操作 | 守卫条件 | 失败错误码 |
+|---|---|---|
+| `candidate-create` | 仅 source actor(抽取器);objective 非空;同源(完整 origin 三元组)任一状态已存在即拒 | `CANDIDATE_FORBIDDEN` / `CANDIDATE_DUPLICATE_ORIGIN` / `CANDIDATE_INVALID_OBJECTIVE` |
+| `candidate-promote` | 仅人类;验收非空(候选抽不出验收,这一段由人补);服务层**先建任务(origin 记候选与源会话)后落晋升**——崩溃窗口内重放由"同 origin.candidateId 的任务已存在"挡住重复晋升 | `CANDIDATE_NOT_FOUND` / `TASK_STALE_REVISION` / `CANDIDATE_ALREADY_EXISTS` / `CANDIDATE_INVALID_ACCEPTANCE` / `CANDIDATE_INVALID_TRANSITION` |
+| `candidate-ignore` | 仅人类;终态 | 同上 CAS 两码 + `CANDIDATE_FORBIDDEN` / `CANDIDATE_INVALID_TRANSITION` |
+| `candidate-supersede` | 仅 source actor(来源会话把事做完了);理由必填;终态 | 同上 + `CANDIDATE_INVALID_REASON` |
+
+记录字段:id、origin(`sessionId` + tier + key)、objective / acceptance 草稿(结构档 acceptance 留空由人补)、note(blocker / 计划正文等)、promotedTaskId(晋升后)、createdAt、revision。候选不持上下文包——它只有草稿,不是工作现场。人类与 source 的候选变更只落域事件,不写会话回执(它们不经会话内的模型)。
+
 ## 2. 会话事件(进 `SessionEventMap`,required-on-read)
 
 ### `task/change` —— 模型视角的回执
@@ -95,7 +108,7 @@ type TaskDomainEvent = {
   readonly eventId: TaskEventId              // 单调递增,域内唯一
   readonly taskId: TaskId
   readonly revision: number                  // 变更后版本,域流内严格递增
-  readonly actor: { kind: 'model'; sessionId: SessionId } | { kind: 'human' } | { kind: 'wake' }
+  readonly actor: { kind: 'model'; sessionId: SessionId } | { kind: 'human' } | { kind: 'wake' } | { kind: 'system' } | { kind: 'source' }
   readonly at: string                        // ISO-8601
   readonly change: TaskSnapshotChangeMeta    // 与会话事件同构
 }
@@ -119,6 +132,11 @@ type TaskDomainEvent = {
 | `project(projectId): ProjectView \| undefined` | 单个项目读 |
 | `projectCreate(name, actor): Promise<ProjectHandle>` | 建项目;handle 含 disposer(dispose 即归档) |
 | `projectMutate(id, expectedRevision, mutation, actor): Promise<ProjectView>` | 项目改名/归档(比较置换) |
+| `candidates(): readonly CandidateView[]` | 候选列表(创建序,终态含内) |
+| `candidateByOrigin(origin): CandidateView \| undefined` | 同源查重(抽取器用) |
+| `candidateCreate(input, actor): Promise<CandidateView \| TaskError>` | 产候选(仅 source,§1.3) |
+| `candidatePromote(id, expectedRevision, input, actor): Promise<{ task; candidate } \| TaskError>` | 晋升为任务(仅人类;先建任务后落晋升) |
+| `candidateIgnore(id, expectedRevision, actor)` / `candidateSupersede(id, expectedRevision, reason, actor)` | 终态转换(比较置换) |
 
 `TaskView` = TaskRecord 的只读投影 + 派生项(持有会话、是否阻塞超时)。
 
@@ -127,6 +145,7 @@ type TaskDomainEvent = {
 ```ts
 'task/changed'(payload: { operation: TaskOperation; task: TaskView }): void
 'project/changed'(payload: { operation: ProjectOperation; project: ProjectView }): void
+'candidate/changed'(payload: { operation: CandidateOperation; candidate: CandidateView }): void
 ```
 
 - **非 agent 作用域**(任务跨会话,面板全局订阅)——与 goal 的 agent-scoped 派发是刻意的不对称;

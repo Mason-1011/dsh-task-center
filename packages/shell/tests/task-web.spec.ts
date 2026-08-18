@@ -69,7 +69,7 @@ describe('task-web host', () => {
     expect(board).toBeDefined()
     expect(board.typertRemote.namespace).toBe('task-board')
     const markers = remoteMethods(board)
-    expect(markers.map(marker => marker.method).sort()).toEqual(['act', 'board', 'create', 'show'])
+    expect(markers.map(marker => marker.method).sort()).toEqual(['act', 'board', 'create', 'ignore', 'promote', 'show'])
     for (const marker of markers) {
       expect(marker.invocation).toEqual({ kind: 'direct' })
       expect(marker.exportName).toBeUndefined()
@@ -285,5 +285,69 @@ describe('task-web host', () => {
     // Archiving the project keeps its tasks live and countable; only the flag flips.
     const after = ctx['task-board'].board().projects.find(entry => entry.name === '计数项目')
     expect(after).toMatchObject({ archived: true, taskCount: 2 })
+  })
+
+  it('columns pending candidates oldest-first and only pending', async () => {
+    const born = await ctx.tasks.candidateCreate({
+      objective: '候选甲',
+      note: 'goal 阻塞中(token): 颜色令牌未定',
+      origin: { sessionId: SessionId('s-board-1'), tier: 'goal', key: 'g-a' },
+    }, { kind: 'source' })
+    if ('code' in born) throw new Error(born.code)
+    const second = await ctx.tasks.candidateCreate({
+      objective: '候选乙',
+      origin: { sessionId: SessionId('s-board-2'), tier: 'goal', key: 'g-b' },
+    }, { kind: 'source' })
+    if ('code' in second) throw new Error(second.code)
+    const ignored = await ctx.tasks.candidateIgnore(second.record.id, second.record.revision, { kind: 'human' })
+    if ('code' in ignored) throw new Error(ignored.code)
+
+    const payload: BoardPayload = ctx['task-board'].board()
+    assertNoUndefined(payload)
+    // The column shows the pending inbox only; the ignored verdict leaves it.
+    expect(payload.candidates.map(card => card.objective)).toEqual(['候选甲'])
+    const card = payload.candidates[0]!
+    expect(card).toMatchObject({
+      status: 'pending', note: 'goal 阻塞中(token): 颜色令牌未定',
+      tier: 'goal', sessionId: 's-board-1',
+    })
+  })
+
+  it('promotes with the human-written acceptance and ignores terminally, both over RPC', async () => {
+    const born = await ctx.tasks.candidateCreate({
+      objective: '支持暗色模式',
+      note: 'goal 未完结',
+      origin: { sessionId: SessionId('s-board-3'), tier: 'goal', key: 'g-c' },
+    }, { kind: 'source' })
+    if ('code' in born) throw new Error(born.code)
+
+    // The acceptance is the human's half of the contract; empty never lands.
+    const bare = await ctx['task-board'].promote(born.record.id, born.record.revision, '  ', undefined)
+    expect(bare).toMatchObject({ ok: false, code: 'CANDIDATE_INVALID_ACCEPTANCE' })
+
+    const promoted = await ctx['task-board'].promote(
+      born.record.id, born.record.revision, '切换后全部界面生效', '完整暗色支持',
+    )
+    assertNoUndefined(promoted)
+    expect(promoted).toMatchObject({ ok: true })
+    if (!promoted.ok) throw new Error(promoted.code)
+    const task = ctx.tasks.get(TaskId(promoted.taskId))
+    expect(task?.record).toMatchObject({ objective: '完整暗色支持', acceptance: '切换后全部界面生效' })
+    expect(task?.record.origin?.candidateId).toBe(born.record.id)
+    // Promoted work leaves the 待确认 column.
+    expect(ctx['task-board'].board().candidates.find(card => card.id === born.record.id)).toBeUndefined()
+    // A stale revision surfaces the compare-and-set code, like act.
+    const stale = await ctx['task-board'].promote(born.record.id, born.record.revision, '再来', undefined)
+    expect(stale).toMatchObject({ ok: false, code: 'TASK_STALE_REVISION' })
+
+    const other = await ctx.tasks.candidateCreate({
+      objective: '首屏优化',
+      origin: { sessionId: SessionId('s-board-4'), tier: 'goal', key: 'g-d' },
+    }, { kind: 'source' })
+    if ('code' in other) throw new Error(other.code)
+    const ignored = await ctx['task-board'].ignore(other.record.id, other.record.revision)
+    assertNoUndefined(ignored)
+    expect(ignored).toEqual({ ok: true })
+    expect(ctx['task-board'].board().candidates.find(card => card.id === other.record.id)).toBeUndefined()
   })
 })

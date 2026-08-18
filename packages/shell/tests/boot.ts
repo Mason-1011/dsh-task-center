@@ -27,6 +27,7 @@ import { TaskService } from '@task-center/task'
 import * as TaskLocal from '@task-center/task-local'
 import * as TaskQuota from '@task-center/task-quota'
 import * as TaskReaper from '@task-center/task-reaper'
+import * as TaskSource from '@task-center/task-source'
 import * as TaskWake from '@task-center/task-wake'
 import TaskWeb from '@task-center/task-web'
 import * as ToolTask from '@task-center/tool-task'
@@ -50,6 +51,7 @@ const modules = new Map<string, unknown>([
   ['@deepseek-ai/dsh-storage-domain', StorageDomain],
   ['@task-center/task', TaskService],
   ['@task-center/task-local', TaskLocal],
+  ['@task-center/task-source', TaskSource],
   ['@task-center/tool-task', ToolTask],
   ['@task-center/command-task', CommandTask],
   ['@task-center/task-wake', TaskWake],

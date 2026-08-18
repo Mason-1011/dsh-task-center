@@ -10,7 +10,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveIdle } from '@task-center/task'
-import type { ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
+import type { CandidateView, ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
@@ -43,6 +43,10 @@ const USAGE = [
   '                               — 定时唤醒:到点起新会话做该任务',
   '  /task nowake <id前缀>        — 取消定时唤醒',
   '  /task release <id前缀>       — 释放持有(在办/阻塞 → 待办),死会话卡住时人工接管用',
+  '  /task candidates             — 待确认候选:从闲置会话的 goal/计划/todo 自动抽取的未完任务',
+  '  /task promote <候选前缀> [新目标 ::] <验收标准>',
+  '                               — 候选晋升为任务;验收必填,:: 前段可覆写目标',
+  '  /task ignore <候选前缀>      — 忽略候选(终态,同来源不再提示)',
   '  /task approve <id前缀>       — 验收通过(review → done)',
   '  /task reject <id前缀> <理由> — 打回(review → active),理由必填',
 ].join('\n')
@@ -272,6 +276,63 @@ async function run(ctx: Context, config: Config, rawInput: string): Promise<Comm
         `已创建 [${childId.slice(0, 8)}] ${objective}`,
         `挂接为 [${found.view.record.id.slice(0, 8)}] 的子任务`,
         ...project === undefined ? [] : [`归入项目 ${project.record.name}`],
+      ].join('\n'),
+    }
+  }
+
+  if (sub === 'candidates') {
+    const candidates = ctx.tasks.candidates()
+    if (candidates.length === 0) {
+      return { kind: 'success', text: '还没有候选;闲置会话里未完结的 goal 会自动出现在这里' }
+    }
+    const label: Readonly<Record<CandidateView['record']['status'], string>> = {
+      pending: '待确认', promoted: '已晋升', ignored: '已忽略', superseded: '已失效',
+    }
+    const lines = candidates.flatMap(view => {
+      const { record } = view
+      const source = `${record.origin.tier} · 会话 ${record.origin.sessionId.slice(0, 8)}`
+      return [
+        `- [${record.id.slice(0, 8)}] r${record.revision} ${label[record.status]}: ${record.objective} · 来源 ${source}`,
+        ...record.note === '' ? [] : [`    ${record.note}`],
+        ...record.promotedTaskId === undefined ? [] : [`    已成为任务 [${record.promotedTaskId.slice(0, 8)}]`],
+      ]
+    })
+    const pending = candidates.filter(view => view.record.status === 'pending').length
+    return { kind: 'success', text: [`候选(${pending} 条待确认 / 共 ${candidates.length} 条):`, ...lines].join('\n') }
+  }
+
+  if (sub === 'promote' || sub === 'ignore') {
+    const prefix = tail.split(/\s+/, 1)[0] ?? ''
+    if (prefix === '') return { kind: 'error', text: USAGE }
+    const matches = ctx.tasks.candidates().filter(view => view.record.id.startsWith(prefix))
+    if (matches.length === 0) return { kind: 'error', text: `没有以 ${prefix} 开头的候选` }
+    if (matches.length > 1) {
+      return { kind: 'error', text: `前缀 ${prefix} 匹配多个候选:\n${matches.map(view => `- [${view.record.id.slice(0, 8)}] ${view.record.objective}`).join('\n')}` }
+    }
+    const { record } = matches[0]!
+    if (sub === 'ignore') {
+      const ignored = await ctx.tasks.candidateIgnore(record.id, record.revision, { kind: 'human' })
+      return 'code' in ignored
+        ? failure(ignored)
+        : { kind: 'success', text: `已忽略候选 [${record.id.slice(0, 8)}] ${record.objective}` }
+    }
+    const body = tail.slice(prefix.length)
+    // `::` splits an optional objective override from the acceptance; without
+    // it the whole body is the acceptance and the candidate's objective stands.
+    const separator = body.indexOf('::')
+    const objective = separator === -1 ? '' : body.slice(0, separator).trim()
+    const acceptance = separator === -1 ? body.trim() : body.slice(separator + 2).trim()
+    if (acceptance === '') return { kind: 'error', text: '验收标准不能为空 —— 候选抽不出验收,这一段由人补' }
+    const promoted = await ctx.tasks.candidatePromote(record.id, record.revision, {
+      acceptance,
+      ...objective === '' ? {} : { objective },
+    }, { kind: 'human' })
+    if ('code' in promoted) return failure(promoted)
+    return {
+      kind: 'success',
+      text: [
+        `候选 [${record.id.slice(0, 8)}] 已晋升为任务 [${promoted.task.record.id.slice(0, 8)}] ${promoted.task.record.objective}`,
+        `验收: ${promoted.task.record.acceptance}`,
       ].join('\n'),
     }
   }

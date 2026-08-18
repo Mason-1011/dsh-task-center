@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { appendPackLine, applyMutation, applyProjectMutation, fold } from '../src/fold.ts'
-import { ProjectId, TaskId } from '../src/index.ts'
-import type { ProjectMutation, ProjectRecord, TaskActor, TaskDomainEvent, TaskMutation, TaskRecord } from '../src/types.ts'
+import { appendPackLine, applyCandidateMutation, applyMutation, applyProjectMutation, fold } from '../src/fold.ts'
+import { CandidateId, ProjectId, TaskId } from '../src/index.ts'
+import type { CandidateDomainEvent, CandidateMutation, CandidateRecord, ProjectMutation, ProjectRecord, TaskActor, TaskDomainEvent, TaskMutation, TaskRecord } from '../src/types.ts'
 
 const packLimit = 1000
 const actorHuman: TaskActor = { kind: 'human' }
@@ -350,5 +350,88 @@ describe('project mutations', () => {
     const moved = apply({ operation: 'edit', projectId: ProjectId('p-other') }, record, actorHuman)
     expect(moved.projectId).toBe(ProjectId('p-other'))
     expect(apply({ operation: 'edit', projectId: null }, moved, actorHuman).projectId).toBeUndefined()
+  })
+})
+
+describe('candidate mutations', () => {
+  const actorSource: TaskActor = { kind: 'source' }
+  const birth = (): Extract<CandidateMutation, { operation: 'candidate-create' }> => ({
+    operation: 'candidate-create', candidateId: CandidateId('c1'), objective: '支持暗色模式',
+    note: 'goal 未完结,blocker: 颜色令牌未定',
+    origin: { sessionId, tier: 'goal', key: 'g-1' },
+  })
+
+  function applyCandidate(mutation: CandidateMutation, record: CandidateRecord | undefined, actor: TaskActor = actorSource): CandidateRecord {
+    const result = applyCandidateMutation(record, mutation, { actor, at: '2026-08-14T00:00:00Z', packByteLimit: packLimit })
+    if ('error' in result) throw new Error(result.error.code)
+    return result.ok
+  }
+
+  /** Apply one candidate mutation expecting rejection, returning its code. */
+  function candidateError(mutation: CandidateMutation, record: CandidateRecord | undefined, actor: TaskActor = actorSource): string {
+    const result = applyCandidateMutation(record, mutation, { actor, at: '', packByteLimit: packLimit })
+    return 'error' in result ? result.error.code : `unexpected success: ${result.ok.revision}`
+  }
+
+  it('walks create → promote with the task link, and ignores', () => {
+    const created = applyCandidate(birth(), undefined)
+    expect(created).toMatchObject({ revision: 1, status: 'pending', objective: '支持暗色模式', acceptance: '' })
+    const promoted = applyCandidate({ operation: 'candidate-promote', acceptance: '切换后全部界面生效', taskId: TaskId('t9') }, created, actorHuman)
+    expect(promoted).toMatchObject({ revision: 2, status: 'promoted', promotedTaskId: TaskId('t9') })
+    // Terminal: no verb lands after promote.
+    expect(candidateError({ operation: 'candidate-ignore' }, promoted, actorHuman)).toBe('CANDIDATE_INVALID_TRANSITION')
+    const fresh = applyCandidate({ ...birth(), candidateId: CandidateId('c2'), origin: { sessionId, tier: 'goal', key: 'g-2' } }, undefined)
+    expect(applyCandidate({ operation: 'candidate-ignore' }, fresh, actorHuman).status).toBe('ignored')
+  })
+
+  it('pins authority: source births and supersedes, humans promote and ignore', () => {
+    expect(candidateError(birth(), undefined, actorHuman)).toBe('CANDIDATE_FORBIDDEN')
+    expect(candidateError(birth(), undefined, actorModel)).toBe('CANDIDATE_FORBIDDEN')
+    const created = applyCandidate(birth(), undefined)
+    expect(candidateError({ operation: 'candidate-promote', acceptance: 'x', taskId: TaskId('t') }, created, actorSource)).toBe('CANDIDATE_FORBIDDEN')
+    expect(candidateError({ operation: 'candidate-ignore' }, created, actorSource)).toBe('CANDIDATE_FORBIDDEN')
+    expect(candidateError({ operation: 'candidate-ignore' }, created, actorModel)).toBe('CANDIDATE_FORBIDDEN')
+    expect(candidateError({ operation: 'candidate-supersede', reason: 'goal completed' }, created, actorHuman)).toBe('CANDIDATE_FORBIDDEN')
+    expect(applyCandidate({ operation: 'candidate-supersede', reason: 'goal completed' }, created).status).toBe('superseded')
+  })
+
+  it('validates fields and refuses re-create', () => {
+    expect(candidateError({ ...birth(), objective: '  ' }, undefined)).toBe('CANDIDATE_INVALID_OBJECTIVE')
+    expect(candidateError({ ...birth(), origin: { sessionId, tier: 'goal', key: ' ' } }, undefined)).toBe('CANDIDATE_INVALID_OBJECTIVE')
+    const created = applyCandidate(birth(), undefined)
+    expect(candidateError({ operation: 'candidate-promote', acceptance: '  ', taskId: TaskId('t') }, created, actorHuman)).toBe('CANDIDATE_INVALID_ACCEPTANCE')
+    expect(candidateError({ operation: 'candidate-supersede', reason: '' }, created)).toBe('CANDIDATE_INVALID_REASON')
+    expect(candidateError(birth(), created)).toBe('CANDIDATE_ALREADY_EXISTS')
+    expect(candidateError({ operation: 'candidate-ignore' }, undefined)).toBe('CANDIDATE_NOT_FOUND')
+  })
+
+  it('keeps the source actor off tasks and carries task origin', () => {
+    expect(applyMutation(undefined, create(), { actor: actorSource, at: '', packByteLimit: packLimit }))
+      .toEqual({ error: { code: 'TASK_FORBIDDEN', message: expect.any(String) } })
+    const origin = { candidateId: CandidateId('c1'), sessionId }
+    const record = apply({ operation: 'create', taskId: TaskId('t1'), objective: 'o', acceptance: 'a', origin }, undefined, actorHuman)
+    expect(record.origin).toEqual(origin)
+  })
+
+  it('folds a candidate stream beside tasks with independent revisions', () => {
+    const events: (TaskDomainEvent | CandidateDomainEvent)[] = []
+    const emitCandidate = (mutation: CandidateMutation, actor: TaskActor) => {
+      const record = applyCandidate(mutation, events.length === 0 ? undefined : fold(events, packLimit).candidates.get(CandidateId('c1'))!, actor)
+      events.push({
+        eventId: `c${events.length}` as never,
+        candidateId: CandidateId('c1'), revision: record.revision, actor, at: '2026-08-14T00:00:00Z',
+        change: { kind: 'candidate/change', version: 1, operation: mutation.operation, candidateId: CandidateId('c1'), revision: record.revision, mutation, candidate: { record } },
+      })
+    }
+    emitCandidate(birth(), actorSource)
+    const taskRecord = apply(create(), undefined, actorHuman)
+    events.push({
+      eventId: 't0' as never, taskId: TaskId('t1'), revision: 1, actor: actorHuman, at: '',
+      change: { kind: 'task/change', version: 1, operation: 'create', taskId: TaskId('t1'), revision: 1, mutation: create(), task: { record: taskRecord, blockedOverdue: false, archived: false } },
+    })
+    emitCandidate({ operation: 'candidate-promote', acceptance: '验收', taskId: TaskId('t1') }, actorHuman)
+    const folded = fold(events, packLimit)
+    expect(folded.candidates.get(CandidateId('c1'))?.status).toBe('promoted')
+    expect(folded.tasks.get(TaskId('t1'))?.revision).toBe(1)
   })
 })

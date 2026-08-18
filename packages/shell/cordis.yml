@@ -52,6 +52,12 @@
 - id: task-local
   name: '@task-center/task-local'
 
+- id: task-source
+  name: '@task-center/task-source'
+  config:
+    pollSeconds: 30
+    idleHours: 3
+
 - id: tool-task
   name: '@task-center/tool-task'
 

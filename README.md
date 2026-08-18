@@ -7,12 +7,7 @@
 
 ## 切片计划
 
-| 切片 | 包 | 产出 |
-|---|---|---|
-| 1(进行中) | `packages/task` | 任务接缝定义件:状态机、双账本事件、`ctx.tasks` 服务 |
-| 2 | `packages/task-local` | storage-domain 后端 provider |
-| 3 | `packages/tool-task` | 模型五工具 + 提示词段,headless 跑通"创建→认领→推进→提交"闭环 |
-| 4 | `task-wake` + 面板/命令 | 定时唤醒与人类看板 |
+实现进度与分期见 [docs/design/04-plan.md](docs/design/04-plan.md):P0 已全部落地;当前推进[抽取层](docs/design/06-extraction.md)(任务从闲置会话的 goal/计划/todo 自动出生为候选,人确认晋升)——6a 已落地,6b 起按切分表推进。
 
 ## 布局
 
@@ -31,17 +26,19 @@ packages/      @task-center/* 插件包(pnpm workspace)
 corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
 ```
 
-**2. 装包**:从仓库根装入 8 个插件包(`shell` 除外:它是自带 REPL 的独立启动器,与 dsh 的运行模式冲突)——
+**2. 装包**:从仓库根装入 9 个插件包(`shell` 除外:它是自带 REPL 的独立启动器,与 dsh 的运行模式冲突)——
 
 ```sh
 dsh plugin --profile headless add \
   file:./packages/task file:./packages/task-local file:./packages/tool-task \
   file:./packages/command-task file:./packages/task-wake \
-  file:./packages/task-quota file:./packages/task-reaper
+  file:./packages/task-quota file:./packages/task-reaper \
+  file:./packages/task-source
 dsh plugin --profile web add \
   file:./packages/task file:./packages/task-local file:./packages/tool-task \
   file:./packages/command-task file:./packages/task-wake \
-  file:./packages/task-quota file:./packages/task-reaper file:./packages/task-web
+  file:./packages/task-quota file:./packages/task-reaper file:./packages/task-web \
+  file:./packages/task-source
 ```
 
 profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板,其他名字从 `dsh-base` 起)。
@@ -72,6 +69,11 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
     - id: task-local
       name: '@task-center/task-local'
       config: {}
+    - id: task-source
+      name: '@task-center/task-source'
+      config:
+        pollSeconds: 30
+        idleHours: 3
     - id: tool-task
       name: '@task-center/tool-task'
       config: {}

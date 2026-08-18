@@ -421,4 +421,46 @@ describe('command-task', () => {
     await fiber.dispose()
     expect(ctx.commands.find(agent, 'task')).toBeUndefined()
   })
+
+  it('manages candidates: list, promote with acceptance, ignore stays terminal', async () => {
+    const { ctx, agent } = await boot()
+    const empty = await dispatch(ctx, agent, '/task candidates')
+    expect(textOf(empty)).toContain('还没有候选')
+
+    // The extractor births a candidate (source actor), as task-source will.
+    const born = await ctx.tasks.candidateCreate({
+      objective: '支持暗色模式',
+      note: 'goal 未完结,blocker: 颜色令牌未定',
+      origin: { sessionId: SessionId('s-goal'), tier: 'goal', key: 'g-1' },
+    }, { kind: 'source' })
+    if ('code' in born) throw new Error(born.code)
+    await ctx.tasks.candidateCreate({
+      objective: '首屏优化',
+      origin: { sessionId: SessionId('s-goal'), tier: 'goal', key: 'g-2' },
+    }, { kind: 'source' })
+
+    const listed = await dispatch(ctx, agent, '/task candidates')
+    expect(textOf(listed)).toContain('2 条待确认')
+    expect(textOf(listed)).toContain('支持暗色模式')
+    expect(textOf(listed)).toContain('来源 goal · 会话 s-goal')
+
+    // Missing acceptance refuses; humans write what the extractor cannot.
+    const bare = await dispatch(ctx, agent, `/task promote ${born.record.id.slice(0, 8)}`)
+    expect(bare.result).toMatchObject({ kind: 'error' })
+
+    const promoted = await dispatch(ctx, agent, `/task promote ${born.record.id.slice(0, 8)} 切换后全部界面生效`)
+    expect(textOf(promoted)).toContain('已晋升为任务')
+    const task = ctx.tasks.list({})[0]!
+    expect(task.record.objective).toBe('支持暗色模式')
+    expect(task.record.acceptance).toBe('切换后全部界面生效')
+    expect(task.record.origin?.candidateId).toBe(born.record.id)
+
+    const again = await dispatch(ctx, agent, `/task promote ${born.record.id.slice(0, 8)} :: 再来一次`)
+    expect(again.result).toMatchObject({ kind: 'error' })
+
+    const second = ctx.tasks.candidates().find(view => view.record.origin.key === 'g-2')!
+    const ignored = await dispatch(ctx, agent, `/task ignore ${second.record.id.slice(0, 8)}`)
+    expect(textOf(ignored)).toContain('已忽略')
+    expect(ctx.tasks.candidates().find(view => view.record.origin.key === 'g-2')!.record.status).toBe('ignored')
+  })
 })

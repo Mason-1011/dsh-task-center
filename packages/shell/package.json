@@ -37,6 +37,7 @@
     "@task-center/task-local": "workspace:*",
     "@task-center/task-quota": "workspace:*",
     "@task-center/task-reaper": "workspace:*",
+    "@task-center/task-source": "workspace:*",
     "@task-center/task-wake": "workspace:*",
     "@task-center/task-web": "workspace:*",
     "@task-center/tool-task": "workspace:*"
@@ -66,6 +67,7 @@
     "@task-center/task-quota": "workspace:*",
     "@task-center/task-reaper": "workspace:*",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
+    "@task-center/task-source": "workspace:*",
     "@task-center/task-wake": "workspace:*",
     "@task-center/task-web": "workspace:*",
     "@task-center/tool-task": "workspace:*"
