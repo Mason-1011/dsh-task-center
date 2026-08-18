@@ -9,6 +9,7 @@
 | [03-plugins.md](03-plugins.md) | 插件族:接缝拆分、task-wake 修正、执行链 |
 | [04-plan.md](04-plan.md) | 分期计划(P0/P1/P2)与纪律自检清单 |
 | [05-seam-spec.md](05-seam-spec.md) | 定义件规格:状态机转换表、事件 schema、服务 API、工具 schema |
+| [06-extraction.md](06-extraction.md) | 抽取与同步草案:闲置会话自动抽取任务(三必要条件防噪声)+ 持有会话进度自动回流台账 |
 | [dsh-plugin-analysis.md](dsh-plugin-analysis.md) | 背景参考:dsh 现有插件如何基于 Cordis 实现(机制字典) |
 
 ## 关键决策(摘要)
