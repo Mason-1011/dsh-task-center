@@ -10,7 +10,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { CandidateId, ProjectId, TaskId, effectiveIdle, lastSessionActivity } from '@task-center/task'
+import { CandidateId, ProjectId, TaskId, effectiveIdle, historySessionIds, lastSessionActivity } from '@task-center/task'
 import type { HolderActivity, TaskMutation, TaskView } from '@task-center/task'
 import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, ShowResult, TaskCard } from './wire.ts'
 
@@ -70,6 +70,7 @@ export class TaskBoardService extends TypertRemoteService {
   /** One task view as one wire card; optional facts are omitted, not nulled. */
   private card(view: TaskView, now: Date): TaskCard {
     const record = view.record
+    const history = historySessionIds(record)
     return {
       id: record.id,
       revision: record.revision,
@@ -80,6 +81,7 @@ export class TaskBoardService extends TypertRemoteService {
       idleDays: effectiveIdle(this.ctx.tasks, view, now, this.holderActivity),
       subtaskCount: record.subtasks.length,
       ...record.holder === undefined ? {} : { holder: record.holder },
+      ...history.length === 0 ? {} : { historySessions: history },
       ...record.projectId === undefined ? {} : { projectId: record.projectId },
       ...record.blockedReason === undefined
         ? {}

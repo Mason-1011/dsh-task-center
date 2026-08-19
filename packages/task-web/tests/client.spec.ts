@@ -3,8 +3,8 @@
  * dsh ModuleLoader under the package id, its factory runs with only the
  * platform seeds on require (react family + the official UI primitives), and
  * its cordis plugin applies into exactly two slot registrations (sidebar
- * footer button + shell overlay) with function components and a connection
- * face.
+ * footer button + shell overlay) with function components; faces carry the
+ * connection service, the overlay additionally the session jump.
  * @module @task-center/task-web/tests/client
  */
 
@@ -56,20 +56,22 @@ describe('task-web client bundle', () => {
     expect(code).not.toMatch(/#10141c|#161d29|#242c3a|#1a2230|#0d1118|#151b26/)
   })
 
-  it('exports a slots+connection plugin applying into both surfaces', async () => {
+  it('exports a slots+connection+sessions plugin applying into both surfaces', async () => {
     const { handoff } = await loadBundle()
     const plugin = handoff.factory(seedRequire)
     expect(typeof plugin['apply']).toBe('function')
-    expect(plugin['inject']).toEqual(['slots', 'connection'])
+    expect(plugin['inject']).toEqual(['slots', 'connection', 'sessions'])
 
     const registrations: { key: string; definition: Record<string, unknown>; Component: unknown }[] = []
     const connection = { rpc: { call: async () => ({ ok: true, value: {} }) } }
+    const opened: string[] = []
     const ctx = {
       slots: {
         inject: (key: string, register: () => unknown) => { registrations.push({ key, ...register() as { definition: Record<string, unknown>; Component: unknown } }) },
         register: (definition: Record<string, unknown>, Component: unknown) => ({ definition, Component }),
       },
       connection,
+      sessions: { open: (id: string) => opened.push(id) },
       on: () => {},
     }
     ;(plugin['apply'] as (context: unknown) => void)(ctx)
@@ -80,8 +82,16 @@ describe('task-web client bundle', () => {
       expect(typeof entry.Component).toBe('function')
       expect(entry.definition['name']).toBe(entry.key)
       // The face carries the live connection service; no `locale`, so no `t`.
-      const face = (entry.definition['inject'] as (owner: unknown) => unknown)({})
-      expect(face).toEqual({ connection })
+      const face = (entry.definition['inject'] as (owner: unknown) => Record<string, unknown>)({})
+      expect(face['connection']).toBe(connection)
+      if (entry.key === 'shell.overlay') {
+        // The overlay face also carries the session jump, wired to ctx.sessions.
+        const openSession = face['openSession'] as (id: string) => void
+        openSession('s-9')
+        expect(opened).toEqual(['s-9'])
+      } else {
+        expect(Object.keys(face)).toEqual(['connection'])
+      }
     }
   })
 })

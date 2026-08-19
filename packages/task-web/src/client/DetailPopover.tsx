@@ -1,8 +1,9 @@
 /**
  * Detail modal for one card: full objective/acceptance, project, holder,
- * blocking reason, child rows with status dots, and the context-pack tail
- * over the official CodeBlock. Fetched on mount; unknown ids render the
- * host's error code.
+ * historical sessions, blocking reason, child rows with status dots, and the
+ * context-pack tail over the official CodeBlock. Every session id — holder
+ * and history alike — is a chip that jumps the conversation view to it.
+ * Fetched on mount; unknown ids render the host's error code.
  * @module @task-center/task-web/client/DetailPopover
  */
 
@@ -13,8 +14,22 @@ import type { ConnectionService } from './context.ts'
 import { boardStore } from './store.ts'
 import { STATUS_DOT, STATUS_LABEL } from './status.ts'
 
+/** One clickable session id chip; jumps the conversation view to it. */
+function SessionLink(props: { id: string; onOpen: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      className="task-web-session-link"
+      title="打开该会话"
+      onClick={() => props.onOpen(props.id)}
+    >
+      {props.id}
+    </button>
+  )
+}
+
 /** One task's detail, over the official Modal (widened via doubled class). */
-export function DetailPopover(props: { connection: ConnectionService; taskId: string; onClose: () => void }) {
+export function DetailPopover(props: { connection: ConnectionService; openSession: (id: string) => void; taskId: string; onClose: () => void }) {
   const [result, setResult] = useState<ShowResult | undefined>()
 
   useEffect(() => {
@@ -57,8 +72,20 @@ export function DetailPopover(props: { connection: ConnectionService; taskId: st
             )}
             <div className="task-web-field">
               <span className="task-web-field-label">持有会话</span>
-              <span className="task-web-lines">{result.task.holder ?? '无'}</span>
+              {result.task.holder === undefined
+                ? <span className="task-web-lines">无</span>
+                : <SessionLink id={result.task.holder} onOpen={props.openSession} />}
             </div>
+            {result.task.historySessions !== undefined && (
+              <div className="task-web-field">
+                <span className="task-web-field-label">历史对话 ({result.task.historySessions.length})</span>
+                <div className="task-web-sessions">
+                  {result.task.historySessions.map(id => (
+                    <SessionLink key={id} id={id} onOpen={props.openSession} />
+                  ))}
+                </div>
+              </div>
+            )}
             {result.task.blockedMessage !== undefined && (
               <div className="task-web-field">
                 <span className="task-web-field-label">阻塞</span>

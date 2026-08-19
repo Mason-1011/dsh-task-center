@@ -51,9 +51,24 @@ export interface ConnectionService {
   }
 }
 
+/**
+ * The web client's sessions service (`ctx.sessions`) — narrowed to the one
+ * jump surface this board consumes. The full contract brands `SessionId`; the
+ * wire hands us plain JSON strings, and method-parameter bivariance lets the
+ * real service satisfy this structural face.
+ */
+export interface SessionsService {
+  /**
+   * Select a session as current (the conversation view switches to it).
+   * @param id - session id; must exist in the host's list.
+   */
+  open(id: string): void
+}
+
 /** The client-side plugin context: only what this bundle touches. */
 export interface ClientContext {
   readonly slots: SlotsService
   readonly connection: ConnectionService
+  readonly sessions: SessionsService
   readonly on: (event: string, listener: () => void) => void
 }

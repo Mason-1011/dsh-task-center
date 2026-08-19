@@ -72,7 +72,7 @@ export function BoardButton(props: { connection: ConnectionService; wide?: boole
 type Filter = 'all' | 'none' | string
 
 /** The full-screen board overlay; renders nothing while closed. */
-export function BoardOverlay(props: { connection: ConnectionService }) {
+export function BoardOverlay(props: { connection: ConnectionService; openSession: (id: string) => void }) {
   const state = useBoard()
   const [filter, setFilter] = useState<Filter>('all')
   const [detailId, setDetailId] = useState<string | undefined>()
@@ -169,7 +169,7 @@ export function BoardOverlay(props: { connection: ConnectionService }) {
                 <div className="task-web-col-empty">暂无候选;闲置会话里未完结的 goal 会自动出现在这里</div>
               )}
               {payload?.candidates.map(card => (
-                <CandidateCardView key={card.id} connection={props.connection} card={card} />
+                <CandidateCardView key={card.id} connection={props.connection} card={card} openSession={props.openSession} />
               ))}
             </div>
           </div>
@@ -195,7 +195,7 @@ export function BoardOverlay(props: { connection: ConnectionService }) {
         </div>
 
         {detailId !== undefined && (
-          <DetailPopover connection={props.connection} taskId={detailId} onClose={() => setDetailId(undefined)} />
+          <DetailPopover connection={props.connection} openSession={props.openSession} taskId={detailId} onClose={() => setDetailId(undefined)} />
         )}
         {creating && payload !== undefined && (
           <CreateForm

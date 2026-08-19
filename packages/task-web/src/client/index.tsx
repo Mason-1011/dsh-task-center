@@ -12,12 +12,18 @@ import { boardStore } from './store.ts'
 import { ensureStyles } from './styles.ts'
 
 /** The client-side services this bundle consumes. */
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'sessions']
 
 /** Register both board surfaces and prime the footer button's staleness dot. */
 export function apply(ctx: ClientContext): void {
   // The entry button needs its styles from the first paint, not first click.
   ensureStyles()
+  // A session jump lands on a conversation page; the board overlay must not
+  // stay stacked over it.
+  const openSession = (id: string): void => {
+    boardStore.closeBoard()
+    ctx.sessions.open(id)
+  }
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'task-web-board',
@@ -29,7 +35,7 @@ export function apply(ctx: ClientContext): void {
     name: 'shell.overlay',
     id: 'task-web-board',
     order: 100,
-    inject: () => ({ connection: ctx.connection }),
+    inject: () => ({ connection: ctx.connection, openSession }),
   }, BoardOverlay))
   void boardStore.prime(ctx.connection)
   // A reconnect invalidates everything cached; the next open refetches.

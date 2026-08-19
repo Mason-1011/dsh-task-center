@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { KNOWN_SESSION_EVENT_TYPES, Session, SessionId } from '@deepseek-ai/dsh-session'
-import { TaskService, TaskId, ProjectId } from '../src/index.ts'
+import { TaskService, TaskId, ProjectId, historySessionIds } from '../src/index.ts'
 import type { ProjectHandle, TaskHandle } from '../src/index.ts'
 import type { TaskActor, TaskError, TaskMutation, TaskView } from '../src/types.ts'
 
@@ -105,6 +105,44 @@ describe('TaskService lifecycle', () => {
     expect(types).toContain('task/change')
     const claimReceipt = session.events.find(event => event.type === 'task/context-injected')
     expect(claimReceipt?.data).toMatchObject({ taskId, version: 1 })
+  })
+
+  it('derives history from origin plus claims, and injects prior sessions at claim', async () => {
+    const { service } = setup()
+    // A plain created task has no history; its first claim injects no line.
+    const plain = await newTask(service)
+    const zeroth = Session.create(SessionId('s-zero'))
+    await service.claim(plain, zeroth, { kind: 'model', sessionId: SessionId('s-zero') })
+    const zerothReceipt = zeroth.events.find(event => event.type === 'task/context-injected')
+    expect(zerothReceipt?.data.content).not.toContain('PRIOR SESSIONS')
+
+    // Acceptance birth: the origin session never claims, yet leads the history.
+    const born = view(await service.acceptanceCreate({
+      objective: '贪吃蛇做好了', completionNote: 'n', sessionId: SessionId('s-origin'), goalId: 'g-1',
+    }, { kind: 'source' }))
+    expect(historySessionIds(born.record)).toEqual([SessionId('s-origin')])
+    // Birth lands in review; the human verdict returns it to the claimable backlog.
+    view(await service.mutate(born.record.id, born.record.revision, { operation: 'reject', reason: '不对' }, human))
+
+    const first = Session.create(SessionId('s-first'))
+    const firstModel: TaskActor = { kind: 'model', sessionId: SessionId('s-first') }
+    const claimed = view(await service.claim(born.record.id, first, firstModel))
+    expect(historySessionIds(claimed.record)).toEqual([SessionId('s-origin'), SessionId('s-first')])
+    const firstReceipt = first.events.find(event => event.type === 'task/context-injected')
+    expect(firstReceipt?.data.content).toContain('PRIOR SESSIONS: s-origin')
+
+    const submitted = view(await service.mutate(born.record.id, claimed.record.revision, { operation: 'submit', completionNote: 'n' }, firstModel, first))
+    // Reject pushes the held task back to its holder; the human then frees it
+    // for a different session to take over.
+    const rejected = view(await service.mutate(born.record.id, submitted.record.revision, { operation: 'reject', reason: '再来' }, human))
+    expect(rejected.record.holder).toBe(SessionId('s-first'))
+    view(await service.mutate(born.record.id, rejected.record.revision, { operation: 'release' }, human))
+    const second = Session.create(SessionId('s-second'))
+    const reclaimed = view(await service.claim(born.record.id, second, { kind: 'model', sessionId: SessionId('s-second') }))
+    expect(historySessionIds(reclaimed.record)).toEqual([SessionId('s-origin'), SessionId('s-first'), SessionId('s-second')])
+    // The reclaimer is told which recorded conversations came before it.
+    const secondReceipt = second.events.find(event => event.type === 'task/context-injected')
+    expect(secondReceipt?.data.content).toContain('PRIOR SESSIONS: s-origin s-first')
   })
 
   it('rejects stale revisions and human-only operations by model actors', async () => {

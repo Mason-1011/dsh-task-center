@@ -174,6 +174,16 @@ const CSS = `
 /* ── detail modal content (Modal provides the chrome) ── */
 .task-web-detail { display: flex; flex-direction: column; gap: 12px; }
 .task-web-detail-objective { font: var(--dsw-font-base-strong-16); color: var(--dsw-alias-label-primary); line-height: 1.5; word-break: break-word; }
+/* session ids are jump chips wherever they appear (holder, history, source) */
+.task-web-sessions { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-web-session-link {
+  display: inline-flex; align-items: center; padding: 1px 8px;
+  font-family: var(--ds-font-family-code); font-size: 11px;
+  color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
+  cursor: pointer;
+}
+.task-web-session-link:hover { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); }
 .task-web-children { display: flex; flex-direction: column; gap: 4px; }
 .task-web-child {
   display: flex; gap: 8px; align-items: center; font: var(--dsw-font-xxs-12);

@@ -6,6 +6,7 @@
  * @module @task-center/task/fold
  */
 
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   CandidateDomainEvent,
   CandidateId,
@@ -97,6 +98,21 @@ export function appendPackLine(pack: string, line: string, byteLimit: number): s
   let cut = candidate.length
   while (cut > 0 && byteLength(candidate.slice(cut)) + marker.length + 1 > byteLimit) cut--
   return `${marker}\n${candidate.slice(cut)}`
+}
+
+/**
+ * Every session that has ever carried this task, oldest first: the birth
+ * origin's session (promoted and acceptance-born alike) followed by each
+ * claiming session in first-claim order. Pure derivation over the record —
+ * the board links each entry to that conversation, and claim-time injection
+ * reports the sessions before the claimer.
+ * @param record - folded task state.
+ * @returns distinct session ids; the origin session leads unless a later claim already listed it.
+ */
+export function historySessionIds(record: TaskRecord): readonly SessionId[] {
+  const origin = record.origin?.sessionId
+  if (origin === undefined || record.sessionIds.includes(origin)) return record.sessionIds
+  return [origin, ...record.sessionIds]
 }
 
 /** Mutable draft of an immutable record, for building the next state. */

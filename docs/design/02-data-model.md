@@ -25,7 +25,7 @@ defineDomain({
 | `status` | 状态机:`todo / active / blocked / review / done` |
 | `blockedReason` | 阻塞原因(结构化 code + message,仿 goal) |
 | `workspaceIds` | 关联工作区(跨项目在此发生) |
-| `sessionIds` | 挂接的会话(有序执行史) |
+| `sessionIds` | 挂接的会话(有序执行史,`claim` 追加);历史对话 = `origin.sessionId` 置首 + sessionIds,纯派生 `historySessionIds(record)` |
 | `contextPack` | 上下文包(见 §4) |
 | `wakeRule` | 可选唤醒规则(after / at / every) |
 | `subtasks` | 子任务 id 列表(父聚合子进度) |

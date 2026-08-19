@@ -6,6 +6,7 @@
  */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { historySessionIds } from '@task-center/task'
 import type { ProjectView, TaskError, TaskErrorCode, TaskView } from '@task-center/task'
 
 /** One task as the model sees it: identity, discipline fields, and the pack. */
@@ -18,6 +19,8 @@ export interface TaskToolTask {
   readonly workspaceIds: string[]
   readonly projectId: string | null
   readonly holder: string | null
+  /** Sessions that carried this task before, oldest first (origin session leads). */
+  readonly historySessionIds: string[]
   readonly blockedReason?: { code: string; message: string }
   readonly subtasks: string[]
   readonly contextPack: string
@@ -120,6 +123,7 @@ export function taskToolTask(view: TaskView): TaskToolTask {
     acceptance: record.acceptance,
     workspaceIds: [...record.workspaceIds],
     holder: record.holder === undefined ? null : record.holder,
+    historySessionIds: [...historySessionIds(record)],
     ...record.blockedReason === undefined ? {} : {
       blockedReason: { code: record.blockedReason.code, message: record.blockedReason.message },
     },
@@ -147,6 +151,7 @@ export const TASK_SCHEMA = {
     workspaceIds: { type: 'array', required: true, items: { type: 'string' } },
     projectId: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
     holder: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
+    historySessionIds: { type: 'array', required: true, items: { type: 'string' } },
     blockedReason: {
       type: 'object',
       additionalProperties: false,

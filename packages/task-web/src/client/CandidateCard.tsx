@@ -19,7 +19,7 @@ const TIER_LABEL: Readonly<Record<Card['tier'], string>> = {
 }
 
 /** One candidate card with its inline promote form and ignore button. */
-export function CandidateCardView(props: { connection: ConnectionService; card: Card }) {
+export function CandidateCardView(props: { connection: ConnectionService; card: Card; openSession: (id: string) => void }) {
   const { card } = props
   const [promoting, setPromoting] = useState(false)
   const [acceptance, setAcceptance] = useState('')
@@ -61,7 +61,17 @@ export function CandidateCardView(props: { connection: ConnectionService; card: 
     <div className="task-web-card task-web-candidate">
       <span className="task-web-card-meta">
         <span className="task-web-card-id">[{card.id.slice(0, 8)}] r{card.revision}</span>
-        <span>来源 {TIER_LABEL[card.tier]} · 会话 {card.sessionId.slice(0, 8)}</span>
+        <span>
+          来源 {TIER_LABEL[card.tier]} · 会话{' '}
+          <button
+            type="button"
+            className="task-web-session-link"
+            title="打开该会话"
+            onClick={() => props.openSession(card.sessionId)}
+          >
+            {card.sessionId.slice(0, 8)}
+          </button>
+        </span>
       </span>
       <span className="task-web-objective" style={{ display: 'block' }}>{card.objective}</span>
       {card.note !== '' && <span className="task-web-mark" style={{ display: 'block' }}>{card.note}</span>}

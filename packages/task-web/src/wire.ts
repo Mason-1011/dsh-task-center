@@ -36,6 +36,8 @@ export interface TaskCard {
   readonly subtaskCount: number
   /** Holding session id; omitted when unclaimed. */
   readonly holder?: string
+  /** Sessions that carried this task before, oldest first; omitted when none. */
+  readonly historySessions?: readonly string[]
   /** Owning project id; omitted for the unassigned bucket. */
   readonly projectId?: string
   /** Blocking reason code; omitted unless status is blocked. */

@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { applyCandidateMutation, applyMutation, applyProjectMutation, fold } from './fold.ts'
+import { applyCandidateMutation, applyMutation, applyProjectMutation, fold, historySessionIds } from './fold.ts'
 import { appendReceipt, registerReceiptTypes } from './receipts.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
@@ -41,7 +41,7 @@ import type {
 import type { LedgerEvent } from './store.ts'
 
 export * from './types.ts'
-export { fold, applyMutation, applyProjectMutation, applyCandidateMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
+export { fold, applyMutation, applyProjectMutation, applyCandidateMutation, TRANSITIONS, appendPackLine, checkWakeRule, historySessionIds, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
 export { appendReceipt, registerReceiptTypes } from './receipts.ts'
 export { idleDays, effectiveIdle, lastSessionActivity } from './idle.ts'
 export type { HolderActivity, TaskReader } from './idle.ts'
@@ -399,16 +399,24 @@ export class TaskService extends Service {
     return view
   }
 
-  /** Register `session` as the holder; appends the session to `sessionIds`. */
+  /**
+   * Register `session` as the holder; appends the session to `sessionIds`.
+   * The injected pack is prefixed with one `PRIOR SESSIONS` line whenever
+   * other sessions carried the task before this claim, so a fresh claimer
+   * knows its work continues recorded conversations.
+   */
   async claim(taskId: TaskId, session: Session, actor: TaskActor): Promise<TaskView | TaskError> {
     const current = this.get(taskId)
     if (current === undefined) return { code: 'TASK_NOT_FOUND', message: 'task does not exist' }
     const view = await this.commit(taskId, { operation: 'claim' }, actor, session)
     if ('code' in view) return view
+    const priorSessions = historySessionIds(view.record).filter(id => id !== session.id)
     appendReceipt(session, 'task/context-injected', {
       kind: 'task/context-injected', version: 1, taskId,
       revision: view.record.revision,
-      content: view.record.contextPack,
+      content: priorSessions.length === 0
+        ? view.record.contextPack
+        : `PRIOR SESSIONS: ${priorSessions.join(' ')}\n${view.record.contextPack}`,
     })
     return view
   }

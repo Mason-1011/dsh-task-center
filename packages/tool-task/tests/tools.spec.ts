@@ -83,6 +83,8 @@ describe('tool-task', () => {
     const claimed = await ok(ctx, 'task_claim', { task_id: created.id })
     expect(claimed.status).toBe('active')
     expect(claimed.holder).toBe(sessionId as never)
+    // The projection carries the claiming history the board links on.
+    expect(claimed.historySessionIds).toEqual([sessionId])
     expect(claimed.contextPack).toBe('')
 
     const types = session.events.map(event => event.type)

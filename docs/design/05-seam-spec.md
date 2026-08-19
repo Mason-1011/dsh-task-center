@@ -97,7 +97,7 @@ interface TaskContextInjectedMeta {
   readonly version: 1
   readonly taskId: TaskId
   readonly revision: number                  // 注入时的任务版本
-  readonly content: string                   // 注入的 contextPack 全文(铁律:日志可重建注入物)
+  readonly content: string                   // 注入全文:认领前已有其他会话经手(history 去掉本次会话非空)则前置一行 PRIOR SESSIONS: <id> …,随后 contextPack 全文(铁律:日志可重建注入物)
 }
 ```
 
@@ -156,7 +156,7 @@ type TaskDomainEvent = {
 | 工具 | 输入 | 成功值 | 错误并集 |
 |---|---|---|---|
 | `task_create` | objective, acceptance, workspaceIds?, parentTaskId?, projectId? | TaskView(含 subtasks id 列表) | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask / stale_revision |
-| `task_claim` | taskId | TaskView + contextPack(同时产生 `task/context-injected` 会话事件) | not_found / already_claimed |
+| `task_claim` | taskId | TaskView + contextPack(投影含 `historySessionIds` 执行史;同时产生 `task/context-injected` 会话事件) | not_found / already_claimed |
 | `task_update` | taskId, revision, note, next? | TaskView | not_claimed / stale_revision / invalid_note |
 | `task_report` | taskId, revision, outcome: `'blocked' \| 'review'`, reason?, completionNote? | TaskView | invalid_transition / invalid_reason / invalid_note |
 | `task_query` | filter(status?, workspaceId?, projectId?, parentTaskId?, limit?) | TaskView[] | invalid_filter / not_found |
