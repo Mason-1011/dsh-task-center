@@ -1,32 +1,66 @@
 # dsh-task-center
 
-> 个人任务指挥中心:dsh(DeepSeek Harness)的任务全生命周期插件族。
+> 个人任务指挥中心:[dsh(DeepSeek Harness)](https://github.com/deepseek-harness/deepseek-harness) 的任务全生命周期插件族。
 > **人管一摊长期任务,agent 跨会话认领并推进,定时自己醒来干活,进度对人类永远可见。**
 
-独立于 [deepseek-harness](https://github.com/deepseek-harness/deepseek-harness) 实现的 out-of-tree 插件仓库,依赖其公开发布的 npm 包(`@deepseek-ai/cordis`、`@deepseek-ai/dsh-*`)。已装 dsh 的机器上加载本插件族,见[「装进已安装的 dsh」](#装进已安装的-dsh)。设计档案见 [docs/design/](docs/design/)。
+## 简介
 
-## 切片计划
+dsh(以及 Claude Code / Codex 这类 agent 工具)的工作单位是**会话**——会话结束,主动性就死。本仓库解决四类断点:
 
-实现进度与分期见 [docs/design/04-plan.md](docs/design/04-plan.md):P0 已全部落地;当前推进[抽取层](docs/design/06-extraction.md)(任务从闲置会话的 goal/计划/todo 自动出生为候选,人确认晋升)——6a 已落地,6b 起按切分表推进。
+- **跨时间**:任务做三天,每天新会话,模型每次失忆;
+- **跨项目**:一个功能动三个仓库,三个会话互不知晓;
+- **跨窗口/设备**:能带走日志文件,带不走"进行中的工作";
+- **跨执行者**:人与子 agent 分头做,谁也不知道整体进度。
 
-## 布局
+dsh-task-center 把任务做成**宿主外的一族插件**,同一份任务账本服务两类用户:**人**(看板看全景、验收裁决)与**模型**(认领任务、恢复上下文、推进汇报)。一句话:**面板负责"看见",工具负责"推进",闹钟负责"活着"。**
+
+独立于 harness 主仓实现,只依赖其公开发布的 npm 包(`@deepseek-ai/cordis`、`@deepseek-ai/dsh-*`),不侵入主仓。完整设计档案见 [docs/design/](docs/design/)。
+
+## 功能特性
+
+- **任务全生命周期**——五态状态机(待办/进行中/阻塞/待验收/已完成),append-only 事件账本,所有变更 CAS 过版本号,重启即恢复;
+- **跨会话交接**——新会话认领任务时自动注入上下文包与 `PRIOR SESSIONS` 前序会话清单,不需要人复述背景;看板上每个会话 id 都可点击直达对话;
+- **子任务委派**——一个任务挂多个子任务,不同会话并行持有、各自推进,父任务聚合子进度;
+- **项目与工作区分组**——人类管理的项目 + 任务出生时自动盖戳的工作区目录,看板四类筛选(全部/项目/工作区/无分组);
+- **定时干活**——任务挂唤醒规则(一次/定点/周期),到点自动起新会话认领续干;每日巡检会话刷新全部未完结任务现状;
+- **额度感知**——API 额度用尽自动挂起并释放持有,额度重置点自动唤醒续做;
+- **崩溃恢复**——持有任务的会话死亡(崩溃/被杀),自动释放持有,任务回到可认领;
+- **自动抽取**——闲置会话里的 goal/已批计划/todo 自动出生为候选,人确认晋升;做完却无人回应的 goal 直接进待验收;验收打回自动把理由推回原对话重做;
+- **双界面**——Web 全屏看板(五列、筛选、阻塞置顶、详情、新建)与 `/task` 命令面板读同一份账本。
+
+## 架构总览
+
+任务数据采用**双账本**:权威事件流(`~/.dsh/storages/task.json`,append-only)+ 会话日志回执(`task/change`、`task/context-injected` 事件)——账本保证重启恢复与跨会话一致性,回执保证模型输入可从日志重建。
+
+| 包 | 角色 | 说明 |
+|---|---|---|
+| [`task`](packages/task) | 核心(Service) | `ctx.tasks`:状态机、项目、子任务、contextPack、事件;`workspacePath` 出生盖戳 |
+| [`task-local`](packages/task-local) | 存储 Provider | 经 storage-domain 开域,后端路由 json/sqlite |
+| [`tool-task`](packages/tool-task) | 模型面(Consumer) | 七个模型工具 + 提示词段 |
+| [`command-task`](packages/command-task) | 人类面(Consumer) | `/task` 命令:面板、项目、候选看管 |
+| [`task-web`](packages/task-web) | 人类面(Consumer) | Web 看板:Typert 服务 + 浏览器 bundle |
+| [`task-wake`](packages/task-wake) | 时间面(Provider) | 到点起新会话干活 + 每日巡检 |
+| [`task-quota`](packages/task-quota) | 额度(Provider) | QUOTA 失败挂起释放,重置点续做 |
+| [`task-reaper`](packages/task-reaper) | 存活(Provider) | 释放死持有,崩溃恢复 |
+| [`task-source`](packages/task-source) | 抽取(Provider) | 扫描闲置会话产候选;回合末差分回流;验收出生与打回回流 |
+| [`shell`](packages/shell) | 独立 REPL 壳 | 一条命令组装全部插件的交互启动器 |
 
 ```
-docs/design/   设计档案(从 harness 仓库迁移的底稿)
+docs/design/   设计档案(产品定义、数据模型、接缝规格、计划、抽取层)
 packages/      @task-center/* 插件包(pnpm workspace)
 ```
 
-## 装进已安装的 dsh
+## 安装
 
 前置:已全局安装 [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh)(`npm i -g @deepseek-ai/dsh`),且 `dsh plugin` 能找到 `pnpm`(corepack 用户:`corepack enable`;若 node 目录无写权限,`corepack enable --install-directory <目录>` 后把该目录挂上 PATH)。
 
-**1. 构建**:Node 不做 `node_modules` 下的 `.ts` 类型擦除,插件必须以 JS 产物装入 profile——
+**1. 构建**(Node 不做 `node_modules` 下的 `.ts` 类型擦除,插件必须以 JS 产物装入 profile):
 
 ```sh
 corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
 ```
 
-**2. 装包**:从仓库根装入 9 个插件包(`shell` 除外:它是自带 REPL 的独立启动器,与 dsh 的运行模式冲突)——
+**2. 装包**(从仓库根装入;`shell` 除外——它是自带 REPL 的独立启动器,与 dsh 运行模式冲突):
 
 ```sh
 dsh plugin --profile headless add \
@@ -105,22 +139,39 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
 
 </details>
 
-**4. 使用**:
+**4. 验证组合树**:
 
 ```sh
-export DEEPSEEK_API_KEY=...                    # 或在 web 的 Models 页保存
-dsh --profile headless "某任务"                 # 一次性:建 agent、干活、打印结果、退出
-dsh web                                        # 浏览器 UI:任务工具进模型,/task 命令面进人类
-dsh --profile <name> --dump-config             # 不启动,只检查组合树
+dsh --profile <name> --dump-config   # 不启动,只检查组合树
 ```
 
-## Web 看板(task-web)
+## 使用
 
-`@task-center/task-web` 是插件族的 web 原生界面:侧栏底栏「任务看板」按钮点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),与 headless 的 `/task` 面板读同一份账本、走同一个人身份动作面(approve/reject/release/abandon/block 全部 CAS 过版本号,冲突即刷新不覆盖)。
+```sh
+export DEEPSEEK_API_KEY=...          # 或在 web 的 Models 页保存
+dsh --profile headless "某任务"       # 一次性:建 agent、干活、打印结果、退出
+dsh web                              # 浏览器 UI:任务工具进模型,/task 命令面进人类
+```
 
-- **宿主半**:Typert Remote 服务,web 客户端经 `/api` 通道调 `task-board/board|show|act|create`。无推送通道,看板打开时 10 秒轮询 + 每次动作后即拉。
-- **浏览器半**:esbuild 打成单个经典脚本,包进 `window.__ModuleLoader__.load({...})` 信封由 web 客户端加载;只 require react 系平台种子,槽位注册进 `sidebar.footer.action`(入口按钮)与 `shell.overlay`(看板浮层)。
-- ⚠ 横幅与按钮上的 ⚠ 点:`staleDays`(默认 3)天内最久未动的开放任务,闲置天数按子树取新鲜值(委托进行中不算搁置)。
+### 模型工具(tool-task)
+
+| 工具 | 作用 |
+|---|---|
+| `task_create` | 建任务(objective / acceptance),可挂父任务或归入项目;出生工作区由会话目录自动盖戳 |
+| `task_claim` | 认领并取回完整上下文包;注入前序会话清单 |
+| `task_update` | 记一条进展(note / next),自动解除阻塞 |
+| `task_report` | 上报:blocked(附理由)或 review(附对照验收标准的自检) |
+| `task_patrol` | 记巡检观察:不认领、不改状态、不刷新闲置时钟 |
+| `task_query` | 按 status / workspace_path / project_id 过滤;按父任务列存活子任务 |
+| `task_projects` | 列人类管理的项目(创建序,含归档标记) |
+
+### 人类动作
+
+验收裁决(approve / reject)、释放、弃置、阻塞、项目建改归档、候选晋升——全部仅人类可操作,模型工具面不注册这些动词。Web 看板与 `/task` 命令面走同一个人动作面,冲突即刷新不覆盖。验收打回时,理由自动作为用户消息推回原对话并代为认领重做。
+
+### Web 看板(task-web)
+
+侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务与上下文包尾部。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
 
 web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
 
@@ -131,19 +182,46 @@ web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
         staleDays: 3
 ```
 
-**坑**:client bundle 的判定与 rev 都按进程缓存——改客户端代码必须 `corepack pnpm run build` 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add。headless profile 不装此包(无 client 消费者)。
+## 配置
 
-**迭代与坑**:
-
-- 改了插件源码:`corepack pnpm run build` 后,对 profile 先 `remove` 再 `add` 同一批包——pnpm 缓存 `file:` 拷贝,`--force` 刷不掉。
-- patch 插入的行必须带显式 `config`(空也给 `{}`):patch 路径不把缺失 config 归一化,apply 直读 config 的插件(如 task-quota)会当场崩。
-- 账本位置:dsh profile 共用 `~/.dsh/storages`;独立 REPL 壳(下节 `corepack pnpm start`)默认 `~/.dsh-task-center`,两者互不相通。
+| 字段 | 所属插件 | 默认 | 说明 |
+|---|---|---|---|
+| `contextPackByteLimit` | task | — | 上下文包字节上限 |
+| `listDefaultLimit` | task | — | list/query 默认返回上限 |
+| `pollSeconds` | task-source / task-wake | 30 | 扫描/唤醒轮询间隔 |
+| `idleHours` | task-source | 3 | 会话闲置判定窗口 |
+| `summariesPerTick` | task-source | 2 | 每轮总结会话上限(装机风暴防护) |
+| `transcriptEvents` | task-source | 40 | 总结提示词携带的近端消息条数 |
+| `staleDays` | command-task / task-web | 3 | 搁置告警阈值(天) |
+| `patrol.at` | task-wake | — | 每日巡检时刻(如 `'09:30'`;错过即跳过) |
+| `agent` | task-source / task-wake | — | 唤醒/总结会话的路由(provider + model) |
 
 ## 开发
 
 ```sh
 pnpm install
-pnpm run build
-pnpm run test
+pnpm run build       # 全量构建(含 web client bundle)
+pnpm run test        # 构建 + vitest;真模型 e2e 无 DEEPSEEK_API_KEY 时自跳过
+pnpm run typecheck
 ```
 
+独立 REPL 壳(不经 dsh profile,默认账本 `~/.dsh-task-center`):
+
+```sh
+corepack pnpm start                  # 也可 --root <目录> 指定工作根
+```
+
+### 常见问题与坑
+
+- **改了插件源码**:`corepack pnpm run build` 后,对 profile 先 `remove` 再 `add` 同一批包——pnpm 缓存 `file:` 拷贝,`--force` 刷不掉;
+- **改了 web 客户端代码**:client bundle 的判定与版本按进程缓存,必须 build 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add;headless profile 不装 task-web(无 client 消费者);
+- **patch 插入的行必须带显式 `config`**(空也给 `{}`):patch 路径不把缺失 config 归一化,apply 直读 config 的插件(如 task-quota)会当场崩;
+- **账本位置**:dsh profile 共用 `~/.dsh/storages`;独立 REPL 壳默认 `~/.dsh-task-center`,两者互不相通。
+
+## 路线图
+
+实现进度与分期见 [docs/design/04-plan.md](docs/design/04-plan.md):P0/P1、抽取层(6a–6f,含验收出生与打回回流)、进度回流三层、看板历史对话与工作区融合均已落地。当前里程碑:**真实使用一周**,按实际痛点迭代。
+
+## 许可
+
+尚未设定开源许可证(私有仓库)。
