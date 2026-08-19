@@ -143,6 +143,15 @@ describe('TaskService lifecycle', () => {
     // The reclaimer is told which recorded conversations came before it.
     const secondReceipt = second.events.find(event => event.type === 'task/context-injected')
     expect(secondReceipt?.data.content).toContain('PRIOR SESSIONS: s-origin s-first')
+
+    // The same session claiming again after a release (the push-back
+    // re-claim path) lists once — and its own injection names the others.
+    view(await service.mutate(born.record.id, reclaimed.record.revision, { operation: 'release' }, human))
+    const again = Session.create(SessionId('s-first'))
+    const reclaimedTwice = view(await service.claim(born.record.id, again, firstModel))
+    expect(historySessionIds(reclaimedTwice.record)).toEqual([SessionId('s-origin'), SessionId('s-first'), SessionId('s-second')])
+    const thirdReceipt = again.events.find(event => event.type === 'task/context-injected')
+    expect(thirdReceipt?.data.content).toContain('PRIOR SESSIONS: s-origin s-second')
   })
 
   it('rejects stale revisions and human-only operations by model actors', async () => {

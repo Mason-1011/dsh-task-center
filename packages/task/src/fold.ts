@@ -103,16 +103,24 @@ export function appendPackLine(pack: string, line: string, byteLimit: number): s
 /**
  * Every session that has ever carried this task, oldest first: the birth
  * origin's session (promoted and acceptance-born alike) followed by each
- * claiming session in first-claim order. Pure derivation over the record —
- * the board links each entry to that conversation, and claim-time injection
- * reports the sessions before the claimer.
+ * claiming session in first-claim order. One session claiming again after a
+ * release (a rejection push-back re-claim, a re-staged task) still lists
+ * once — `sessionIds` is an execution log, this projection is the distinct
+ * set. Pure derivation over the record — the board links each entry to that
+ * conversation, and claim-time injection reports the sessions before the
+ * claimer.
  * @param record - folded task state.
- * @returns distinct session ids; the origin session leads unless a later claim already listed it.
+ * @returns distinct session ids; the origin session leads unless a claim already listed it.
  */
 export function historySessionIds(record: TaskRecord): readonly SessionId[] {
-  const origin = record.origin?.sessionId
-  if (origin === undefined || record.sessionIds.includes(origin)) return record.sessionIds
-  return [origin, ...record.sessionIds]
+  const seen = new Set<string>()
+  const history: SessionId[] = []
+  for (const id of [record.origin?.sessionId, ...record.sessionIds]) {
+    if (id === undefined || seen.has(id)) continue
+    seen.add(id)
+    history.push(id)
+  }
+  return history
 }
 
 /** Mutable draft of an immutable record, for building the next state. */
