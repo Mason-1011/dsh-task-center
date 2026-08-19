@@ -394,13 +394,15 @@ async function birthAcceptances(ctx: Context, sessionId: SessionId, completions:
  * host-layer tools alone, so the rework turn would hear `unknown tool` for
  * every file or shell call its original session made. Without a preset roster
  * or a persistence backend (tests, minimal assemblies) the setup composes
- * nothing — the api-proxy's own no-roster behavior.
+ * nothing — the api-proxy's own no-roster behavior. Exported for the other
+ * one-turn delivery paths that resume a shelved session (task-sched's
+ * scheduled sends).
  *
  * @param ctx - plugin context carrying the optional roster and persistence services.
  * @param sessionId - the session about to be resumed.
  * @returns the setup for `agents.resume`; mounts the recorded preset, or the roster default when the log records none.
  */
-async function recordedPresetSetup(ctx: Context, sessionId: SessionId): Promise<AgentSetup> {
+export async function recordedPresetSetup(ctx: Context, sessionId: SessionId): Promise<AgentSetup> {
   const presets = ctx.get('agentPresets')
   const persistence = ctx.get('sessionPersistence')
   if (presets === undefined || persistence === undefined) return () => {}

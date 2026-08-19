@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { applyCandidateMutation, applyMutation, applyProjectMutation, fold, historySessionIds } from './fold.ts'
+import { applyCandidateMutation, applyMutation, applyProjectMutation, fold, historySessionIds, wakeTarget } from './fold.ts'
 import { appendReceipt, registerReceiptTypes } from './receipts.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
@@ -41,7 +41,7 @@ import type {
 import type { LedgerEvent } from './store.ts'
 
 export * from './types.ts'
-export { fold, applyMutation, applyProjectMutation, applyCandidateMutation, TRANSITIONS, appendPackLine, checkWakeRule, historySessionIds, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
+export { fold, applyMutation, applyProjectMutation, applyCandidateMutation, TRANSITIONS, appendPackLine, checkWakeRule, wakeTarget, describeWake, nextWakeAt, historySessionIds, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
 export { appendReceipt, registerReceiptTypes } from './receipts.ts'
 export { idleDays, effectiveIdle, lastSessionActivity } from './idle.ts'
 export type { HolderActivity, TaskReader } from './idle.ts'
@@ -445,11 +445,8 @@ export class TaskService extends Service {
     for (const view of this.list({ includeArchived: true })) {
       const rule = view.record.wakeRule
       if (rule === undefined || view.archived || view.record.status === 'done') continue
-      const target = rule.kind === 'after'
-        ? Date.parse(view.record.createdAt) + rule.afterSeconds * 1000
-        : rule.kind === 'at' ? Date.parse(rule.scheduledAt)
-          : Date.parse(rule.anchorAt) + rule.everySeconds * 1000
-      if (!Number.isNaN(target) && target <= now) {
+      const target = wakeTarget(rule, view.record.createdAt)
+      if (target !== undefined && target <= now) {
         due.push({ taskId: view.record.id, rule, revision: view.record.revision })
       }
     }

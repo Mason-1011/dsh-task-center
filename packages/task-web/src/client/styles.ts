@@ -173,6 +173,32 @@ const CSS = `
 
 /* ── detail modal content (Modal provides the chrome) ── */
 .task-web-detail { display: flex; flex-direction: column; gap: 12px; }
+/* ── the scheduling field: session select + content + datetime + chips ── */
+.task-web-sched { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.task-web-sched .task-web-select-wrap { max-width: 220px; }
+.task-web-datetime {
+  height: 32px; padding: 0 8px;
+  font: var(--dsw-font-xs-13); font-family: inherit;
+  color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
+  color-scheme: light dark;
+}
+.task-web-datetime:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.task-web-chip {
+  height: 24px; padding: 0 10px;
+  font: var(--dsw-font-xxs-12); color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px; cursor: pointer; font-family: inherit;
+}
+.task-web-chip:hover { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); }
+.task-web-sched-rows { display: flex; flex-direction: column; gap: 4px; }
+.task-web-sched-row {
+  display: flex; align-items: center; gap: 8px; font: var(--dsw-font-xs-13);
+  padding: 4px 8px; background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px;
+}
+.task-web-sched-when { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.task-web-sched-status { color: var(--dsw-alias-label-tertiary); margin-left: auto; }
 .task-web-detail-objective { font: var(--dsw-font-base-strong-16); color: var(--dsw-alias-label-primary); line-height: 1.5; word-break: break-word; }
 /* session ids are jump chips wherever they appear (holder, history, source) */
 .task-web-sessions { display: flex; flex-wrap: wrap; gap: 6px; }

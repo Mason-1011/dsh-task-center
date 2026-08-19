@@ -90,6 +90,43 @@ export function checkWakeRule(rule: WakeRule): string | undefined {
   return undefined
 }
 
+/**
+ * The epoch-ms instant one rule next fires at. `after` anchors at the task's
+ * own creation — the same anchor `TaskService.wakeRules()` reads due by.
+ * @param rule - the armed rule.
+ * @param createdAt - the owning task's ISO-8601 creation instant.
+ * @returns the target epoch ms, or undefined when a timestamp fails to parse.
+ */
+export function wakeTarget(rule: WakeRule, createdAt: string): number | undefined {
+  const target = rule.kind === 'after'
+    ? Date.parse(createdAt) + rule.afterSeconds * 1000
+    : rule.kind === 'at' ? Date.parse(rule.scheduledAt)
+      : Date.parse(rule.anchorAt) + rule.everySeconds * 1000
+  return Number.isNaN(target) ? undefined : target
+}
+
+/**
+ * Human-readable wake rule for the human faces (command detail, board cards).
+ * @param rule - the armed rule.
+ * @returns one-line Chinese description of the rule's shape.
+ */
+export function describeWake(rule: WakeRule): string {
+  if (rule.kind === 'after') return `${rule.afterSeconds} 秒后`
+  if (rule.kind === 'at') return `定点 ${rule.scheduledAt}`
+  return `每 ${rule.everySeconds} 秒(锚点 ${rule.anchorAt})`
+}
+
+/**
+ * The rule's next fire instant as ISO-8601, for human faces to localize.
+ * @param rule - the armed rule.
+ * @param createdAt - the owning task's ISO-8601 creation instant.
+ * @returns the next target instant, or undefined when unparseable.
+ */
+export function nextWakeAt(rule: WakeRule, createdAt: string): string | undefined {
+  const target = wakeTarget(rule, createdAt)
+  return target === undefined ? undefined : new Date(target).toISOString()
+}
+
 /** Bounded context-pack append. Over-budget heads are dropped with a marker line. */
 export function appendPackLine(pack: string, line: string, byteLimit: number): string {
   const candidate = pack.length === 0 ? line : `${pack}\n${line}`

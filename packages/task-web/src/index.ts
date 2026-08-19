@@ -13,7 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 // build program; the promote stamp reads it optionally through `ctx.get`.
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { CandidateId, ProjectId, TaskId, effectiveIdle, historySessionIds, lastSessionActivity } from '@task-center/task'
+import { CandidateId, ProjectId, TaskId, describeWake, effectiveIdle, historySessionIds, lastSessionActivity, nextWakeAt } from '@task-center/task'
 import type { HolderActivity, TaskMutation, TaskView } from '@task-center/task'
 import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, ShowResult, TaskCard } from './wire.ts'
 
@@ -95,6 +95,7 @@ export class TaskBoardService extends TypertRemoteService {
   private card(view: TaskView, now: Date): TaskCard {
     const record = view.record
     const history = historySessionIds(record)
+    const nextAt = record.wakeRule === undefined ? undefined : nextWakeAt(record.wakeRule, record.createdAt)
     return {
       id: record.id,
       revision: record.revision,
@@ -111,7 +112,9 @@ export class TaskBoardService extends TypertRemoteService {
       ...record.blockedReason === undefined
         ? {}
         : { blockedCode: record.blockedReason.code, blockedMessage: record.blockedReason.message },
-      ...record.wakeRule === undefined ? {} : { hasWake: true },
+      ...record.wakeRule === undefined ? {} : {
+        wake: { label: describeWake(record.wakeRule), ...nextAt === undefined ? {} : { nextAt } },
+      },
     }
   }
 

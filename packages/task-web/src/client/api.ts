@@ -11,16 +11,18 @@ import type { RpcError } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 
 /**
- * One typed call into the `task-board` namespace over the /api channel.
+ * One typed call into a task-family RPC namespace over the /api channel.
  * @param connection - the client connection service.
- * @param method - endpoint method, e.g. `board` / `act`.
+ * @param method - endpoint method, e.g. `board` / `act` / `schedCreate`.
  * @param args - business arguments; undefined-valued keys are stripped.
+ * @param namespace - the service namespace; defaults to this board's own.
  * @returns the host method's return value, or one folded RpcError.
  */
 export async function callApi<T>(
   connection: ConnectionService,
   method: string,
   args: Readonly<Record<string, unknown>>,
+  namespace = 'task-board',
 ): Promise<T | RpcError> {
   const clean: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(args)) {
@@ -28,12 +30,12 @@ export async function callApi<T>(
   }
   let envelope
   try {
-    envelope = await connection.rpc.call('/api', `task-board/${method}`, { args: clean })
+    envelope = await connection.rpc.call('/api', `${namespace}/${method}`, { args: clean })
   } catch (cause) {
-    return { ok: false, code: 'BOARD_TRANSPORT', message: String(cause) }
+    return { ok: false, code: 'RPC_TRANSPORT', message: String(cause) }
   }
   if (!envelope.ok) {
-    const error = envelope.error ?? { code: 'BOARD_TRANSPORT', message: '未知传输错误' }
+    const error = envelope.error ?? { code: 'RPC_TRANSPORT', message: '未知传输错误' }
     return { ok: false, code: error.code, message: error.message }
   }
   return envelope.value as T

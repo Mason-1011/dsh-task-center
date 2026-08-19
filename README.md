@@ -22,8 +22,9 @@ dsh-task-center 把任务做成**宿主外的一族插件**,同一份任务账�
 - **跨会话交接**——新会话认领任务时自动注入上下文包与 `PRIOR SESSIONS` 前序会话清单,不需要人复述背景;看板上每个会话 id 都可点击直达对话;
 - **子任务委派**——一个任务挂多个子任务,不同会话并行持有、各自推进,父任务聚合子进度;
 - **项目与工作区分组**——人类管理的项目 + 任务出生时自动盖戳的工作区目录,看板四类筛选(全部/项目/工作区/无分组);
-- **定时干活**——任务挂唤醒规则(一次/定点/周期),到点自动起新会话认领续干;每日巡检会话刷新全部未完结任务现状;
-- **额度感知**——API 额度用尽自动挂起并释放持有,额度重置点自动唤醒续做;
+- **定时干活**——任务挂唤醒规则(一次/定点/周期),到点自动起新会话认领续干;每日巡检会话刷新全部未完结任务现状;看板详情与卡片直接展示已挂的唤醒规则与下次到点时间;
+- **定时发送**——会话页与看板详情均可定一条消息(内容默认 `cont`)与发送时间(附快捷片),到点自动作为用户输入送进目标会话,挂在半路的任务到点自己续上;
+- **额度感知**——API 额度用尽自动挂起并释放持有,额度重置点自动唤醒续做;阻塞卡片标注阻塞原因类别(额度/人工等);
 - **崩溃恢复**——持有任务的会话死亡(崩溃/被杀),自动释放持有,任务回到可认领;
 - **自动抽取**——闲置会话里的 goal/已批计划/todo 自动出生为候选,人确认晋升;做完却无人回应的 goal 直接进待验收;验收打回自动把理由推回原对话重做;
 - **双界面**——Web 全屏看板(五列、筛选、阻塞置顶、详情、新建)与 `/task` 命令面板读同一份账本。
@@ -40,6 +41,7 @@ dsh-task-center 把任务做成**宿主外的一族插件**,同一份任务账�
 | [`command-task`](packages/command-task) | 人类面(Consumer) | `/task` 命令:面板、项目、候选看管 |
 | [`task-web`](packages/task-web) | 人类面(Consumer) | Web 看板:Typert 服务 + 浏览器 bundle |
 | [`task-wake`](packages/task-wake) | 时间面(Provider) | 到点起新会话干活 + 每日巡检 |
+| [`task-sched`](packages/task-sched) | 时间面(Provider) | 定时发送:到点向既有会话投用户消息(默认 `cont`) |
 | [`task-quota`](packages/task-quota) | 额度(Provider) | QUOTA 失败挂起释放,重置点续做 |
 | [`task-reaper`](packages/task-reaper) | 存活(Provider) | 释放死持有,崩溃恢复 |
 | [`task-source`](packages/task-source) | 抽取(Provider) | 扫描闲置会话产候选;回合末差分回流;验收出生与打回回流 |
@@ -72,7 +74,7 @@ dsh plugin --profile web add \
   file:./packages/task file:./packages/task-local file:./packages/tool-task \
   file:./packages/command-task file:./packages/task-wake \
   file:./packages/task-quota file:./packages/task-reaper file:./packages/task-web \
-  file:./packages/task-source
+  file:./packages/task-source file:./packages/task-sched
 ```
 
 profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板,其他名字从 `dsh-base` 起)。
@@ -171,7 +173,7 @@ dsh web                              # 浏览器 UI:任务工具进模型,/task 
 
 ### Web 看板(task-web)
 
-侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务与上下文包尾部。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
+侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务、上下文包尾部、定时唤醒规则与定时发送栏。阻塞卡片与详情标注阻塞原因类别(额度/人工等)。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
 
 web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
 
@@ -180,6 +182,13 @@ web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
       name: '@task-center/task-web'
       config:
         staleDays: 3
+    - id: task-sched
+      name: '@task-center/task-sched'
+      config:
+        pollSeconds: 30
+        agent:
+          provider: deepseek-official
+          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
 ```
 
 ## 配置
@@ -188,13 +197,13 @@ web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
 |---|---|---|---|
 | `contextPackByteLimit` | task | — | 上下文包字节上限 |
 | `listDefaultLimit` | task | — | list/query 默认返回上限 |
-| `pollSeconds` | task-source / task-wake | 30 | 扫描/唤醒轮询间隔 |
+| `pollSeconds` | task-source / task-wake / task-sched | 30 | 扫描/唤醒/发送轮询间隔 |
 | `idleHours` | task-source | 3 | 会话闲置判定窗口 |
 | `summariesPerTick` | task-source | 2 | 每轮总结会话上限(装机风暴防护) |
 | `transcriptEvents` | task-source | 40 | 总结提示词携带的近端消息条数 |
 | `staleDays` | command-task / task-web | 3 | 搁置告警阈值(天) |
 | `patrol.at` | task-wake | — | 每日巡检时刻(如 `'09:30'`;错过即跳过) |
-| `agent` | task-source / task-wake | — | 唤醒/总结会话的路由(provider + model) |
+| `agent` | task-source / task-wake / task-sched | — | 唤醒/总结/定时发送会话的路由(provider + model) |
 
 ## 开发
 
@@ -217,6 +226,7 @@ corepack pnpm start                  # 也可 --root <目录> 指定工作根
 - **改了 web 客户端代码**:client bundle 的判定与版本按进程缓存,必须 build 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add;headless profile 不装 task-web(无 client 消费者);
 - **patch 插入的行必须带显式 `config`**(空也给 `{}`):patch 路径不把缺失 config 归一化,apply 直读 config 的插件(如 task-quota)会当场崩;
 - **账本位置**:dsh profile 共用 `~/.dsh/storages`;独立 REPL 壳默认 `~/.dsh-task-center`,两者互不相通。
+- **task-sched 只装 web profile**:同一张发送表同一时刻只应有一个进程轮询(两个运行器会对同一行各投一次),headless 与独立壳不装;不装的 profile 仍可通过 web 界面下发送。
 
 ## 路线图
 

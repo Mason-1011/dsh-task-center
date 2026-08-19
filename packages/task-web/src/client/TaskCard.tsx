@@ -11,7 +11,8 @@ import { Button, Input, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BoardAction, TaskCard as Card } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 import { boardStore } from './store.ts'
-import { STATUS_DOT, STATUS_LABEL } from './status.ts'
+import { STATUS_DOT, STATUS_LABEL, blockedLabel } from './status.ts'
+import { localWhen } from './time.ts'
 
 /** Actions offered per status; done and archived cards carry none. */
 function actionsOf(card: Card): readonly BoardAction[] {
@@ -48,7 +49,9 @@ export function TaskCardView(props: { connection: ConnectionService; card: Card;
   const markers: string[] = []
   if (open && card.idleDays >= 1) markers.push(`闲置 ${card.idleDays} 天`)
   if (card.subtaskCount > 0) markers.push(`子任务 ×${card.subtaskCount}`)
-  if (card.hasWake === true) markers.push('⏰')
+  if (card.wake !== undefined) {
+    markers.push(`⏰ ${card.wake.nextAt === undefined ? card.wake.label : localWhen(card.wake.nextAt)}`)
+  }
   const dot = STATUS_DOT[card.status]
 
   return (
@@ -69,8 +72,10 @@ export function TaskCardView(props: { connection: ConnectionService; card: Card;
       {markers.length > 0 && (
         <span className="task-web-mark" style={{ display: 'block' }}>{markers.join(' · ')}</span>
       )}
-      {card.blockedMessage !== undefined && card.status === 'blocked' && (
-        <span className="task-web-blocked" style={{ display: 'block' }}>{card.blockedCode}: {card.blockedMessage}</span>
+      {card.status === 'blocked' && card.blockedCode !== undefined && (
+        <span className="task-web-blocked" style={{ display: 'block' }}>
+          阻塞·{blockedLabel(card.blockedCode)}: {card.blockedMessage ?? ''}
+        </span>
       )}
       <span className="task-web-actions" onClick={event => event.stopPropagation()}>
         {actionsOf(card).map(action => (

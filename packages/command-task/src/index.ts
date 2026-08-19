@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveIdle, lastSessionActivity } from '@task-center/task'
 import type { CandidateView, HolderActivity, ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
+import { describeWake } from '@task-center/task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
@@ -183,12 +184,6 @@ function panel(ctx: Context, config: Config, now: Date, status?: TaskStatus, pro
   return { kind: 'success', text: sections.join('\n\n') }
 }
 
-/** Human-readable wake rule. */
-function describeWake(rule: WakeRule): string {
-  if (rule.kind === 'after') return `${rule.afterSeconds} 秒后`
-  if (rule.kind === 'at') return `定点 ${rule.scheduledAt}`
-  return `每 ${rule.everySeconds} 秒(锚点 ${rule.anchorAt})`
-}
 
 /** Detail view of one task, its live children, and the context-pack tail. */
 function show(ctx: Context, view: TaskView, now: Date): CommandResult {

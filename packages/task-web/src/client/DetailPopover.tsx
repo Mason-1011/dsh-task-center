@@ -1,10 +1,11 @@
 /**
  * Detail modal for one card: full objective/acceptance, project, birth
- * workspace, holder,
- * historical sessions, blocking reason, child rows with status dots, and the
- * context-pack tail over the official CodeBlock. Every session id — holder
- * and history alike — is a chip that jumps the conversation view to it.
- * Fetched on mount; unknown ids render the host's error code.
+ * workspace, holder, historical sessions, blocking reason, wake rule, the
+ * scheduling field (a timed user message into one of the task's sessions),
+ * child rows with status dots, and the context-pack tail over the official
+ * CodeBlock. Every session id — holder and history alike — is a chip that
+ * jumps the conversation view to it. Fetched on mount; unknown ids render the
+ * host's error code.
  * @module @task-center/task-web/client/DetailPopover
  */
 
@@ -13,7 +14,9 @@ import { Button, CodeBlock, Modal, StateDot } from '@deepseek-ai/dsh-client-ui-p
 import type { ShowResult } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 import { boardStore } from './store.ts'
-import { STATUS_DOT, STATUS_LABEL } from './status.ts'
+import { SchedField } from './SchedField.tsx'
+import { STATUS_DOT, STATUS_LABEL, blockedLabel } from './status.ts'
+import { localWhen } from './time.ts'
 
 /** One clickable session id chip; jumps the conversation view to it. */
 function SessionLink(props: { id: string; onOpen: (id: string) => void }) {
@@ -93,12 +96,30 @@ export function DetailPopover(props: { connection: ConnectionService; openSessio
                 </div>
               </div>
             )}
-            {result.task.blockedMessage !== undefined && (
+            {result.task.blockedCode !== undefined && (
               <div className="task-web-field">
                 <span className="task-web-field-label">阻塞</span>
-                <span className="task-web-error">{result.task.blockedCode}: {result.task.blockedMessage}</span>
+                <span className="task-web-error">
+                  [{blockedLabel(result.task.blockedCode)}] {result.task.blockedMessage ?? ''}
+                </span>
               </div>
             )}
+            {result.task.wake !== undefined && (
+              <div className="task-web-field">
+                <span className="task-web-field-label">定时唤醒</span>
+                <span className="task-web-lines">
+                  {result.task.wake.label}
+                  {result.task.wake.nextAt !== undefined && ` · 下次 ${localWhen(result.task.wake.nextAt)}`}
+                </span>
+              </div>
+            )}
+            <SchedField
+              connection={props.connection}
+              sessions={[
+                ...result.task.holder === undefined ? [] : [result.task.holder],
+                ...(result.task.historySessions ?? []).filter(id => id !== result.task.holder),
+              ]}
+            />
             {result.children.length > 0 && (
               <div className="task-web-field">
                 <span className="task-web-field-label">子任务 ({result.children.length})</span>

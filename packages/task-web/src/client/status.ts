@@ -27,3 +27,10 @@ export const STATUS_DOT: Readonly<Record<TaskStatus, DotState | undefined>> = {
   review: 'warning',
   done: 'done',
 }
+
+/** Chinese category label per known blocked-reason code; unknown codes show verbatim. */
+export function blockedLabel(code: string): string {
+  if (code === 'quota') return '额度'
+  if (code === 'human-blocked') return '人工'
+  return code
+}

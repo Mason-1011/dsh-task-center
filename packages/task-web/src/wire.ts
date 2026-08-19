@@ -46,8 +46,8 @@ export interface TaskCard {
   readonly blockedCode?: string
   /** Blocking reason message; omitted unless status is blocked. */
   readonly blockedMessage?: string
-  /** Present (true) when a wake rule is armed. */
-  readonly hasWake?: boolean
+  /** The armed wake rule; omitted while none is armed. */
+  readonly wake?: { readonly label: string; readonly nextAt?: string }
 }
 
 /** The stalest open task pinned over the board once it crosses `staleDays`. */

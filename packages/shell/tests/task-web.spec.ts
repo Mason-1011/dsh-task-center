@@ -235,6 +235,23 @@ describe('task-web host', () => {
     expect(card).toMatchObject({ blockedCode: 'human-blocked', blockedMessage: '等外部凭据' })
   })
 
+  it('carries an armed wake rule onto the card as label + next time, omitted when none', async () => {
+    const handle = await ctx.tasks.create({ objective: '定时件', acceptance: 'x' }, { kind: 'human' })
+    if ('code' in handle) throw new Error(handle.code)
+    // No rule armed: the wake key stays absent.
+    expect(ctx['task-board'].board().tasks.find(task => task.id === handle.task.record.id)?.wake).toBeUndefined()
+
+    const scheduledAt = new Date(Date.now() + 3_600_000).toISOString()
+    const armed = await ctx.tasks.mutate(
+      handle.task.record.id, handle.task.record.revision,
+      { operation: 'wake-set', rule: { kind: 'at', scheduledAt } }, { kind: 'human' },
+    )
+    if ('code' in armed) throw new Error(armed.code)
+    assertNoUndefined(armed)
+    const card = ctx['task-board'].board().tasks.find(task => task.id === handle.task.record.id)
+    expect(card?.wake).toEqual({ label: `定点 ${scheduledAt}`, nextAt: scheduledAt })
+  })
+
   it('shows detail: children rows, project name, and the context-pack tail capped at 8 lines', async () => {
     const project = await ctx.tasks.projectCreate('看板项目', { kind: 'human' })
     if ('code' in project) throw new Error(project.code)
