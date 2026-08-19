@@ -2,3 +2,14 @@ packages:
   - packages/*
 allowBuilds:
   esbuild: true
+  koffi: true
+overrides:
+  # One physical instance of the shared transitive bases: without these pins a
+  # new importer (cc-import) re-resolves `^0.1.0-rc.6` to rc.7 on its fresh
+  # paths, splitting dsh-session into peer-suffix copies whose branded types
+  # then fail assignability across package boundaries. rc.6 is what the locked
+  # graph already used everywhere.
+  '@deepseek-ai/dsh-brand': 0.1.0-rc.6
+  '@deepseek-ai/dsh-invariants': 0.1.0-rc.6
+  '@deepseek-ai/dsh-scope': 0.1.0-rc.6
+  '@deepseek-ai/dsh-typert-protocol': 0.1.0-rc.6
