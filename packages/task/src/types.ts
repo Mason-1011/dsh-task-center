@@ -91,15 +91,24 @@ export type WakeRule =
   | { readonly kind: 'at'; readonly scheduledAt: string }
   | { readonly kind: 'every'; readonly everySeconds: number; readonly anchorAt: string }
 
-/** Where a promoted task was born: the candidate and the session whose records produced it. */
-export interface TaskOrigin {
-  readonly candidateId: CandidateId
-  readonly sessionId: SessionId
-}
+/**
+ * Where a task was born. Promotions carry the candidate and its session; a
+ * task surfaced straight from a session whose goal completed without a human
+ * reply carries the session and that goal — the goal id is the dedup key, so
+ * a re-trigger of the same completion never births twice.
+ */
+export type TaskOrigin =
+  | { readonly candidateId: CandidateId; readonly sessionId: SessionId }
+  | { readonly sessionId: SessionId; readonly goalId: string }
 
-/** One mutation request. Discriminated union over the operation verbs. */
+/**
+ * One mutation request. Discriminated union over the operation verbs. A
+ * `create` carrying `completionNote` is the acceptance birth: the task starts
+ * in `review` (source actor only) — work a session declared complete surfaces
+ * for the human verdict without ever being worked in the ledger.
+ */
 export type TaskMutation =
-  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspaceIds?: readonly string[]; readonly origin?: TaskOrigin }
+  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspaceIds?: readonly string[]; readonly origin?: TaskOrigin; readonly completionNote?: string }
   | { readonly operation: 'edit'; readonly objective?: string; readonly acceptance?: string; readonly projectId?: ProjectId | null }
   | { readonly operation: 'claim' }
   | { readonly operation: 'progress'; readonly note: string; readonly next?: string }
@@ -321,6 +330,7 @@ export type TaskErrorCode =
   | 'TASK_SUBTASK_NOT_CHILD'
   | 'TASK_WAKE_INVALID_RULE'
   | 'TASK_INVALID_FILTER'
+  | 'TASK_DUPLICATE_ORIGIN'
   | 'PROJECT_NOT_FOUND'
   | 'PROJECT_ALREADY_EXISTS'
   | 'PROJECT_INVALID_NAME'

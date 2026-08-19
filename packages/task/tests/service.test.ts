@@ -195,3 +195,64 @@ describe('TaskService lifecycle', () => {
     expect(service.children(parent)).toEqual([])
   })
 })
+
+describe('acceptance births', () => {
+  const source: TaskActor = { kind: 'source' }
+  const originSession = SessionId('s-done')
+
+  /** Birth one acceptance task and return its view, failing on the error variant. */
+  async function birth(service: TaskService, goalId = 'g-1', objective = '贪吃蛇做好了'): Promise<TaskView> {
+    return view(await service.acceptanceCreate({
+      objective,
+      completionNote: '目标已在来源会话标记完成,其后无人回应;由抽取层提交,请人工验收',
+      sessionId: originSession,
+      goalId,
+    }, source))
+  }
+
+  it('births straight into review, holderless, with the submission in the pack', async () => {
+    const { service } = setup()
+    const born = await birth(service)
+    expect(born.record).toMatchObject({
+      status: 'review',
+      acceptance: '',
+      origin: { sessionId: originSession, goalId: 'g-1' },
+    })
+    expect(born.record.holder).toBeUndefined()
+    expect(born.record.contextPack).toContain('SUBMITTED: 目标已在来源会话标记完成')
+
+    // Same origin never births twice; a different goal under the same session still may.
+    expect(await service.acceptanceCreate({
+      objective: '贪吃蛇做好了', completionNote: 'n', sessionId: originSession, goalId: 'g-1',
+    }, source)).toMatchObject({ code: 'TASK_DUPLICATE_ORIGIN' })
+    expect((await birth(service, 'g-2', '另一件')).record.origin).toMatchObject({ goalId: 'g-2' })
+  })
+
+  it('approve closes the ledger; reject returns a holderless birth to the claimable backlog', async () => {
+    const { service } = setup()
+    const born = await birth(service)
+    expect(view(await service.mutate(born.record.id, born.record.revision, { operation: 'approve' }, human)).record.status).toBe('done')
+
+    const second = await birth(service, 'g-2', '再做一件但被打回')
+    const rejected = view(await service.mutate(second.record.id, second.record.revision, { operation: 'reject', reason: '样式不对' }, human))
+    expect(rejected.record.status).toBe('todo')
+    expect(rejected.record.holder).toBeUndefined()
+    expect(rejected.record.contextPack).toContain('REJECTED: 样式不对')
+    // Claim is legal only from todo, so the returned work is redoable at once.
+    const session = Session.create(sessionId)
+    expect(view(await service.claim(second.record.id, session, model)).record.status).toBe('active')
+  })
+
+  it('refuses every non-source path and the blank note', async () => {
+    const { service } = setup()
+    for (const actor of [human, model, { kind: 'wake' } as TaskActor]) {
+      expect(await service.acceptanceCreate({
+        objective: 'o', completionNote: 'n', sessionId: originSession, goalId: 'g-1',
+      }, actor)).toMatchObject({ code: 'TASK_FORBIDDEN' })
+    }
+    expect(await service.acceptanceCreate({
+      objective: 'o', completionNote: '   ', sessionId: originSession, goalId: 'g-1',
+    }, source)).toMatchObject({ code: 'TASK_INVALID_NOTE' })
+    expect(service.list({})).toHaveLength(0)
+  })
+})

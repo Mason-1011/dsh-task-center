@@ -16,14 +16,18 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 
 /**
  * The extraction domain: one `covered` table mapping session id to the seq
- * extraction has covered. The value is a plain non-negative integer; absence
- * means the session was never extracted. The domain name spells the plugin
- * name with an underscore (domain names are `[a-z][a-z0-9_]*`).
+ * extraction has covered (absence means never extracted), and one `flags`
+ * table for one-time extractor migrations — a flag's presence means the
+ * migration already ran and must never re-read its ground. The domain name
+ * spells the plugin name with an underscore (domain names are `[a-z][a-z0-9_]*`).
  */
 export const extractionDomainSpec = defineDomain({
   name: 'task_source',
   version: 1,
-  tables: { covered: domainTable<string, number>(z.number().int().nonnegative()) },
+  tables: {
+    covered: domainTable<string, number>(z.number().int().nonnegative()),
+    flags: domainTable<string, string>(z.string()),
+  },
 })
 
 /**
@@ -42,16 +46,30 @@ export interface Marks {
    * @returns resolution after the durable write (a no-op for non-advancing values).
    */
   advance(sessionId: SessionId, seq: number): Promise<void>
+  /** One migration flag's stored value, or undefined while it never ran. */
+  flag(key: string): string | undefined
+  /**
+   * Record one migration flag durably.
+   * @param key - the migration's stable key.
+   * @param value - the value to stamp (the run instant, for the log).
+   * @returns resolution after the durable write.
+   */
+  setFlag(key: string, value: string): Promise<void>
 }
 
 /** Marks with no medium: correct within one process, blank at the next boot. */
 export function memoryMarks(): Marks {
   const coveredMap = new Map<SessionId, number>()
+  const flagMap = new Map<string, string>()
   return {
     covered: sessionId => coveredMap.get(sessionId) ?? -1,
     async advance(sessionId, seq) {
       if (seq < 0 || seq <= (coveredMap.get(sessionId) ?? -1)) return
       coveredMap.set(sessionId, seq)
+    },
+    flag: key => flagMap.get(key),
+    async setFlag(key, value) {
+      flagMap.set(key, value)
     },
   }
 }
@@ -68,6 +86,9 @@ export async function openMarks(
   const table = domain.table('covered')
   const coveredMap = new Map<SessionId, number>()
   for (const [sessionId, seq] of table.entries()) coveredMap.set(SessionId(sessionId), seq)
+  const flags = domain.table('flags')
+  const flagMap = new Map<string, string>()
+  for (const [key, value] of flags.entries()) flagMap.set(key, value)
   return {
     marks: {
       covered: sessionId => coveredMap.get(sessionId) ?? -1,
@@ -75,6 +96,11 @@ export async function openMarks(
         if (seq < 0 || seq <= (coveredMap.get(sessionId) ?? -1)) return
         await table.put(sessionId, seq)
         coveredMap.set(sessionId, seq)
+      },
+      flag: key => flagMap.get(key),
+      async setFlag(key, value) {
+        await flags.put(key, value)
+        flagMap.set(key, value)
       },
     },
     // Durability first, memory second — a rejected write leaves the in-memory

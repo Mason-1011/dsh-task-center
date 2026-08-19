@@ -23,7 +23,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
 import type { CandidateView } from '@task-center/task'
-import { buildSummaryPrompt, extractSession, foldApprovedPlan, foldGoals, foldTodos, parseVerdict, summarize } from '../src/index.ts'
+import { buildSummaryPrompt, extractSession, foldApprovedPlan, foldGoals, foldTodos, foldUnverifiedCompletions, parseVerdict, summarize } from '../src/index.ts'
 import type { Config, SummaryRequest } from '../src/index.ts'
 import * as TaskSource from '../src/index.ts'
 
@@ -263,6 +263,70 @@ describe('foldTodos', () => {
   })
 })
 
+describe('foldUnverifiedCompletions', () => {
+  it('reports a completion no human message follows, earlier human lines notwithstanding', () => {
+    const events = renumber([
+      userMessage('把贪吃蛇做完', 1_000),
+      ...seed([
+        [goal('create', 'g-1', 1, 'active', '贪吃蛇做好了'), 2_000],
+        [goal('complete', 'g-1', 2, 'complete', '贪吃蛇做好了'), 3_000],
+      ]),
+      assistantMessage('完成,蛇会动了。', 4_000),
+    ])
+    expect(foldUnverifiedCompletions(events)).toEqual([{ goalId: 'g-1', objective: '贪吃蛇做好了', completedAtSeq: 2 }])
+  })
+
+  it('verifies on any later human line: the person came back and had their chance', () => {
+    const events = renumber([
+      ...seed([[goal('complete', 'g-1', 2, 'complete'), 1_000]]),
+      userMessage('看到了,不错', 2_000),
+    ])
+    expect(foldUnverifiedCompletions(events)).toEqual([])
+  })
+
+  it('un-completes on a later edit, resume, or clear', () => {
+    const edited = renumber([
+      ...seed([
+        [goal('complete', 'g-1', 2, 'complete'), 1_000],
+        [goal('edit', 'g-1', 3, 'active'), 2_000],
+      ]),
+    ])
+    expect(foldUnverifiedCompletions(edited)).toEqual([])
+    const cleared = renumber([
+      ...seed([
+        [goal('complete', 'g-1', 2, 'complete'), 1_000],
+        [goalClear('g-1', 3), 2_000],
+      ]),
+    ])
+    expect(foldUnverifiedCompletions(cleared)).toEqual([])
+  })
+
+  it('counts a re-completion that postdates the human reply', () => {
+    const events = renumber([
+      ...seed([[goal('complete', 'g-1', 2, 'complete'), 1_000]]),
+      userMessage('这里有个 bug,再改改', 2_000),
+      ...seed([
+        [goal('edit', 'g-1', 3, 'active'), 3_000],
+        [goal('complete', 'g-1', 4, 'complete'), 4_000],
+      ]),
+    ])
+    expect(foldUnverifiedCompletions(events)).toEqual([{ goalId: 'g-1', objective: '支持暗色模式', completedAtSeq: 3 }])
+  })
+
+  it('returns several goals in completion order', () => {
+    const events = renumber([
+      ...seed([
+        [goal('complete', 'g-2', 1, 'complete', '首屏优化'), 1_000],
+        [goal('complete', 'g-1', 1, 'complete', '支持暗色模式'), 2_000],
+      ]),
+    ])
+    expect(foldUnverifiedCompletions(events)).toEqual([
+      { goalId: 'g-2', objective: '首屏优化', completedAtSeq: 0 },
+      { goalId: 'g-1', objective: '支持暗色模式', completedAtSeq: 1 },
+    ])
+  })
+})
+
 describe('extractSession', () => {
   it('births one pending candidate per unfinished goal, blocked goals carry the blocker note', async () => {
     const ctx = await boot()
@@ -491,6 +555,63 @@ describe('task-source plugin', () => {
     await until(() => ctx.tasks.candidates().length === 1)
     expect(sole(ctx).record.origin.sessionId).toBe(SessionId('s-gone'))
   })
+
+  it('births a completed-but-unanswered goal as a review task once idle', async () => {
+    const ctx = await boot()
+    await ctx.plugin(TaskSource, sourceConfig('unused', { pollSeconds: 0.05, idleHours: 3 }))
+    const now = Date.now()
+    liveSession(ctx, 's-done', renumber([
+      userMessage('把贪吃蛇做完', now - 4 * HOUR),
+      ...seed([[goal('create', 'g-1', 1, 'complete', '贪吃蛇做好了'), now - 4 * HOUR + 1]]),
+      assistantMessage('完成,蛇会动了。', now - 4 * HOUR + 2),
+    ]))
+    await until(() => ctx.tasks.list({}).some(task => task.record.status === 'review'))
+    const born = ctx.tasks.list({}).find(task => task.record.status === 'review')!
+    expect(born.record).toMatchObject({
+      objective: '贪吃蛇做好了',
+      origin: { sessionId: SessionId('s-done'), goalId: 'g-1' },
+    })
+    // The finished goal never waits in 待确认 either: candidates stay empty.
+    expect(ctx.tasks.candidates()).toHaveLength(0)
+  })
+
+  it('births nothing when a human line answered the completion', async () => {
+    const ctx = await boot()
+    await ctx.plugin(TaskSource, sourceConfig('unused', { pollSeconds: 0.05, idleHours: 3 }))
+    const now = Date.now()
+    liveSession(ctx, 's-seen', renumber([
+      userMessage('把贪吃蛇做完', now - 4 * HOUR),
+      ...seed([[goal('create', 'g-1', 1, 'complete', '贪吃蛇做好了'), now - 4 * HOUR + 1]]),
+      userMessage('看到了,不错', now - 4 * HOUR + 2),
+    ]))
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(ctx.tasks.list({})).toHaveLength(0)
+    expect(ctx.tasks.candidates()).toHaveLength(0)
+  })
+
+  it('holds a fresh completion for its idle window: the immediate pass births nothing', async () => {
+    const ctx = await boot()
+    await ctx.plugin(TaskSource, sourceConfig('unused', { pollSeconds: 0.05, idleHours: 24 }))
+    const session = liveSession(ctx, 's-fresh-done', renumber([userMessage('把贪吃蛇做完', Date.now())]))
+    session.append('goal/change', goal('create', 'g-1', 1, 'complete', '贪吃蛇做好了'))
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(ctx.tasks.list({})).toHaveLength(0)
+  })
+
+  it('births a completed-but-unanswered goal the moment its session is disposed', async () => {
+    const ctx = await boot()
+    await ctx.plugin(TaskSource, sourceConfig('unused', { idleHours: 24 }))
+    const session = Session.create(SessionId('s-gone-done'), renumber([
+      userMessage('把贪吃蛇做完', 1_000),
+      ...seed([[goal('create', 'g-1', 1, 'complete', '贪吃蛇做好了'), 2_000]]),
+    ]))
+    const detach = ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
+    detach()
+    await until(() => ctx.tasks.list({}).some(task => task.record.status === 'review'))
+    const born = ctx.tasks.list({}).find(task => task.record.status === 'review')!
+    expect(born.record.origin).toEqual({ sessionId: SessionId('s-gone-done'), goalId: 'g-1' })
+  })
 })
 
 /** An idle chat-only session: conversation, no structural record. */
@@ -561,21 +682,26 @@ describe('summarizer tier', () => {
     const ctx = await boot()
     const chat = chatSession(ctx, 's-chat')
     const request = await extractSession(ctx, chat, 1)
-    expect(request).toMatchObject({ sessionId: chat.id, lastSeq: chat.events.at(-1)!.seq })
+    expect(request.summary).toMatchObject({ sessionId: chat.id, lastSeq: chat.events.at(-1)!.seq })
     // Window 1 keeps only the newest line.
-    expect(request!.transcript).toEqual(['模型: 好的,先记下这件事。'])
+    expect(request.summary!.transcript).toEqual(['模型: 好的,先记下这件事。'])
+    expect(request.unverified).toEqual([])
 
-    // Any structural record claims the session — even a finished goal.
+    // Any structural record claims the session — even a finished goal. The
+    // finished goal with no human line after its completion is an unverified
+    // completion the shelving gates will birth for acceptance.
     const withGoal = liveSession(ctx, 's-goal', renumber([
       userMessage('帮我支持暗色模式', 1_000),
       ...seed([[goal('create', 'g-1', 1, 'complete'), 2_000]]),
     ]))
-    expect(await extractSession(ctx, withGoal, 10)).toBeUndefined()
+    const completed = await extractSession(ctx, withGoal, 10)
+    expect(completed.summary).toBeUndefined()
+    expect(completed.unverified).toEqual([{ goalId: 'g-1', objective: '支持暗色模式', completedAtSeq: 1 }])
     // A session with no human line has nothing to judge.
     const quiet = liveSession(ctx, 's-quiet', renumber([
       userMessage('插件通知', 1_000, { kind: 'plugin', plugin: 'p', form: 'notice', summary: '插件通知' }),
     ]))
-    expect(await extractSession(ctx, quiet, 10)).toBeUndefined()
+    expect(await extractSession(ctx, quiet, 10)).toEqual({ unverified: [] })
   })
 
   it('summarizes an idle chat-only session into a candidate through a scripted route', async () => {
@@ -611,7 +737,7 @@ describe('summarizer tier', () => {
 
     // A pending summary candidate from an earlier burst: the none verdict on
     // new activity retires it.
-    const request = await extractSession(ctx, chat, 10)
+    const request = (await extractSession(ctx, chat, 10)).summary
     if (request === undefined) throw new Error('expected a summary request')
     const seeded = await ctx.tasks.candidateCreate({
       objective: '旧的搁置意图', acceptance: '旧标准',

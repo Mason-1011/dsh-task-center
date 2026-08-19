@@ -41,6 +41,7 @@ export const TRANSITIONS: Readonly<Record<TaskOperation, TransitionRule>> = {
   block: { from: ['active'], to: 'blocked' },
   submit: { from: ['active'], to: 'review' },
   approve: { from: ['review'], to: 'done' },
+  // A held task goes back to its holder (active); a holderless acceptance birth falls to the claimable backlog (todo).
   reject: { from: ['review'], to: 'active' },
   release: { from: ['active', 'blocked'], to: 'todo' },
   'subtask-add': { from: ['todo', 'active', 'blocked'], to: 'same' },
@@ -122,16 +123,26 @@ export interface ApplyContext {
  */
 export function applyMutation(record: TaskRecord | undefined, mutation: TaskMutation, context: ApplyContext): TransitionResult {
   const { actor } = context
-  // The source actor is the extractor: it births candidates and mirrors goal
-  // phases, but never works a task itself — progress mirroring attributes to
-  // the holding session, which the authority matrix already covers.
-  if (actor.kind === 'source') {
-    return error('TASK_FORBIDDEN', 'the source actor never works tasks')
+  // The source actor is the extractor: it births candidates, mirrors goal
+  // phases (attributed to the holding session, which the matrix covers), and
+  // surfaces a session's completed-but-unaccepted work as a review-born task —
+  // the one create form allowed to carry a completion note. Every other verb
+  // is beyond it: the extractor never works a task itself.
+  const acceptanceBirth = record === undefined && mutation.operation === 'create' && mutation.completionNote !== undefined
+  if (actor.kind === 'source' && !acceptanceBirth) {
+    return error('TASK_FORBIDDEN', 'the source actor only births completed work for acceptance')
   }
   if (record === undefined) {
     if (mutation.operation !== 'create') return error('TASK_NOT_FOUND', 'task does not exist')
     if (mutation.objective.trim() === '') return error('TASK_INVALID_OBJECTIVE', 'objective must not be empty')
-    if (mutation.acceptance.trim() === '') return error('TASK_INVALID_ACCEPTANCE', 'acceptance must not be empty')
+    if (mutation.completionNote !== undefined) {
+      if (actor.kind !== 'source') {
+        return error('TASK_FORBIDDEN', 'a create carrying a completion note is the source extractor\'s acceptance birth')
+      }
+      if (mutation.completionNote.trim() === '') return error('TASK_INVALID_NOTE', 'an acceptance birth requires a completion note')
+    } else if (mutation.acceptance.trim() === '') {
+      return error('TASK_INVALID_ACCEPTANCE', 'acceptance must not be empty')
+    }
     // The project reference is validated against the same fold at the service
     // commit layer; here it is carried, and `fold` rejects a dangling final state.
     return { ok: {
@@ -139,11 +150,14 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       revision: 1,
       objective: mutation.objective,
       acceptance: mutation.acceptance,
-      status: 'todo',
+      // An acceptance birth starts submitted: the completion is the extractor's
+      // claim, the human verdict is the only transition left.
+      status: mutation.completionNote !== undefined ? 'review' : 'todo',
       workspaceIds: [...mutation.workspaceIds ?? []],
       ...mutation.projectId === undefined ? {} : { projectId: mutation.projectId },
       sessionIds: [],
-      contextPack: '',
+      contextPack: mutation.completionNote === undefined ? ''
+        : appendPackLine('', `- ${context.at} SUBMITTED: ${mutation.completionNote}`, context.packByteLimit),
       ...mutation.origin === undefined ? {} : { origin: mutation.origin },
       subtasks: [],
       createdAt: context.at,
@@ -229,7 +243,10 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
     }
     case 'reject': {
       if (mutation.reason.trim() === '') return error('TASK_INVALID_REASON', 'reject requires a reason')
-      next.status = 'active'
+      // Rejection returns the task to wherever work can start: the holder
+      // redoes (active), a holderless acceptance birth goes back to the
+      // claimable backlog — an unheld active task could never be claimed.
+      next.status = record.holder === undefined ? 'todo' : 'active'
       next.contextPack = appendPackLine(record.contextPack, `- ${context.at} REJECTED: ${mutation.reason}`, context.packByteLimit)
       break
     }

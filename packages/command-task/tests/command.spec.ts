@@ -501,7 +501,8 @@ describe('command-task', () => {
     const task = ctx.tasks.list({})[0]!
     expect(task.record.objective).toBe('支持暗色模式')
     expect(task.record.acceptance).toBe('切换后全部界面生效')
-    expect(task.record.origin?.candidateId).toBe(born.record.id)
+    const promotedOrigin = task.record.origin
+    expect(promotedOrigin !== undefined && 'candidateId' in promotedOrigin && promotedOrigin.candidateId === born.record.id).toBe(true)
 
     const again = await dispatch(ctx, agent, `/task promote ${born.record.id.slice(0, 8)} :: 再来一次`)
     expect(again.result).toMatchObject({ kind: 'error' })

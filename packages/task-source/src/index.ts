@@ -281,6 +281,77 @@ export interface SummaryRequest {
   readonly cwd?: string
 }
 
+/**
+ * One goal the session declared complete that no human message has followed:
+ * the model's own "done" is a claim, not a verdict — the completion surfaces
+ * as a review-born task for the human to accept or reject.
+ */
+export interface UnverifiedCompletion {
+  /** The goal's stable id; doubles as the acceptance-birth dedup key. */
+  readonly goalId: string
+  /** The goal's completion objective; the born task's objective. */
+  readonly objective: string
+  /** Seq of the change that completed the goal; only human messages after it verify. */
+  readonly completedAtSeq: number
+}
+
+/**
+ * Fold one session log to its completed-but-unaccepted goals. A goal counts
+ * while its latest completing change stands (a later edit, resume, or clear
+ * takes it out — unfinished goals are the candidate tier's business) AND no
+ * human message follows that change: any later human line means the person
+ * came back, saw the result, and had their chance to object.
+ * @param events - the complete session log, in seq order.
+ * @returns the unverified completions, in completion order.
+ */
+export function foldUnverifiedCompletions(events: readonly SessionEvent[]): readonly UnverifiedCompletion[] {
+  const standing = new Map<string, UnverifiedCompletion & { seq: number }>()
+  let lastHumanSeq = -1
+  for (const event of events) {
+    if (event.type === 'user/message') {
+      if (event.data.source.kind === 'user') lastHumanSeq = event.seq
+    } else if (event.type === 'goal/change') {
+      const change: GoalChangeMeta = event.data
+      if (change.operation === 'clear') {
+        standing.delete(change.cleared.id)
+      } else if (change.goal.phase === 'complete') {
+        standing.set(change.goal.id, { goalId: change.goal.id, objective: change.goal.objective, completedAtSeq: event.seq, seq: event.seq })
+      } else {
+        standing.delete(change.goal.id)
+      }
+    }
+  }
+  return [...standing.values()]
+    .filter(completion => completion.seq > lastHumanSeq)
+    .map(({ seq, ...completion }) => completion)
+    .sort((left, right) => left.completedAtSeq - right.completedAtSeq)
+}
+
+/**
+ * Birth one session's unverified completions as review tasks (the shelving
+ * gates call this — never the immediate pass): the objective is the goal's
+ * own, the completion note names the submission's nature, and same-origin
+ * dedup at the seam keeps a re-trigger from birthing twice.
+ * @param ctx - Context carrying `tasks`.
+ * @param sessionId - the session whose goals completed unaccepted.
+ * @param completions - the session's folded unverified completions.
+ */
+async function birthAcceptances(ctx: Context, sessionId: SessionId, completions: readonly UnverifiedCompletion[]): Promise<void> {
+  if (completions.length === 0) return
+  const logger = ctx.logger('task-source')
+  for (const completion of completions) {
+    const created = await ctx.tasks.acceptanceCreate({
+      objective: completion.objective,
+      completionNote: '目标已在来源会话标记完成,其后无人回应;由抽取层提交,请人工验收',
+      sessionId,
+      goalId: completion.goalId,
+    }, { kind: 'source' })
+    if ('code' in created) {
+      logger.warn('acceptance birth rejected', { sessionId, goalId: completion.goalId, code: created.code })
+    }
+  }
+}
+
 /** A live session as an extraction source, carrying its working directory. */
 function fromSession(session: Session): ExtractionSource {
   return {
@@ -310,6 +381,18 @@ function conversationLines(events: readonly SessionEvent[]): string[] {
   return lines
 }
 
+/** What one session's extraction left for the caller's gates. */
+export interface ExtractionResult {
+  /** A chat-only summary request, present exactly when no structural tier spoke. */
+  readonly summary?: SummaryRequest
+  /**
+   * Goals the session declared complete with no human message after — model-free
+   * evidence the shelving gates (idle, disposal, sweep) turn into review-born
+   * acceptance tasks; the immediate pass reads them only to stay uncovered.
+   */
+  readonly unverified: readonly UnverifiedCompletion[]
+}
+
 /**
  * Extract candidates from one session's three structural tiers. Birth follows
  * tier priority — goal over approved plan over anchored todo, since the three
@@ -323,10 +406,10 @@ function conversationLines(events: readonly SessionEvent[]): string[] {
  * @param ctx - Context carrying `tasks`.
  * @param session - the session whose log is read.
  * @param transcriptEvents - the conversation window handed to the summarizer.
- * @returns the summary request when the conversation is the only record, else undefined.
+ * @returns the summary request and/or unverified completions the caller's gates own.
  */
-export async function extractSession(ctx: Context, session: ExtractionSource, transcriptEvents: number): Promise<SummaryRequest | undefined> {
-  if (isMachinerySession(session.id)) return undefined
+export async function extractSession(ctx: Context, session: ExtractionSource, transcriptEvents: number): Promise<ExtractionResult> {
+  if (isMachinerySession(session.id)) return { unverified: [] }
   const logger = ctx.logger('task-source')
   const source: TaskActor = { kind: 'source' }
 
@@ -409,10 +492,11 @@ export async function extractSession(ctx: Context, session: ExtractionSource, tr
   // set, no plan approved, no todo written. The conversation is then the only
   // record, and one model session judges the three necessary conditions; a
   // session without a single human line has nothing to judge.
+  let summary: SummaryRequest | undefined
   if (goals.size === 0 && plan === undefined && todos === undefined) {
     const lines = conversationLines(session.events)
     if (lines.some(line => line.startsWith('用户: '))) {
-      return {
+      summary = {
         sessionId: session.id,
         lastSeq: session.events.at(-1)?.seq ?? -1,
         transcript: lines.slice(-transcriptEvents),
@@ -420,7 +504,7 @@ export async function extractSession(ctx: Context, session: ExtractionSource, tr
       }
     }
   }
-  return undefined
+  return { ...summary === undefined ? {} : { summary }, unverified: foldUnverifiedCompletions(session.events) }
 }
 
 /** The summarizer's judgment of one conversation: a task, or a reasoned none. */
@@ -955,16 +1039,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     return { lastSeq: seq, lastEventTime: time, extractedThrough: marks.covered(session.id) }
   }
   /**
-   * Summary requests the live scan no longer carries: their session was
-   * disposed, or they came from the history sweep. `readyAt` applies the idle
-   * gate's own anchor — a disposed session is ready now, swept history is
-   * ready once its last event has been idle long enough. Ticks drain it.
+   * Gate carries the live scan no longer owns: their session was disposed, or
+   * they came from the history sweep. A summary entry waits on the idle gate's
+   * own anchor (a disposed session is ready now, swept history is ready once
+   * its last event has been idle long enough); an acceptance entry carries
+   * deferred completion births behind the same anchor. Ticks drain both.
    */
-  interface PendingSummary {
-    readonly request: SummaryRequest
-    readonly readyAt: number
-  }
-  const queue: PendingSummary[] = []
+  type PendingEntry =
+    | { readonly kind: 'summary'; readonly request: SummaryRequest; readonly readyAt: number }
+    | { readonly kind: 'acceptance'; readonly sessionId: SessionId; readonly lastSeq: number; readonly completions: readonly UnverifiedCompletion[]; readonly readyAt: number }
+  const queue: PendingEntry[] = []
+  /** The session one queued entry speaks for, whatever its kind. */
+  const entrySession = (entry: PendingEntry): SessionId =>
+    entry.kind === 'summary' ? entry.request.sessionId : entry.sessionId
   let probeHoldUntil = 0
   /** Consecutive summarizer failures; each failure doubles the hold, capped. */
   let failureStreak = 0
@@ -1059,14 +1146,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    * candidates the moment their evidence lands; a returned summary request
    * (no structural tier spoke) is ignored — the idle gate, disposal, and the
    * history sweep own the summarizer, so immediate passes never pay for a
-   * model call. A session the pass resolved without a request (a structural
-   * tier spoke, or nothing human was ever said) is covered through its tail:
-   * the summarizer would have nothing to add to that stretch, so neither the
-   * idle tick nor a restart re-reads it. Later activity moves `lastSeq` ahead
-   * of the mark and re-opens the session on its own.
+   * model call. Unverified completions are read but never born and never
+   * covered here: at the moment a goal completes no human has replied YET,
+   * and only the shelving gates see the settled log that answers whether one
+   * ever did — so the watermark stays behind and the session re-opens on its
+   * own at the next extraction. A session the pass fully resolved (a
+   * structural tier spoke with nothing unverified, or nothing human was ever
+   * said) is covered through its tail: neither the idle tick nor a restart
+   * re-reads it. Later activity moves `lastSeq` ahead of the mark and
+   * re-opens the session on its own.
    */
   const structuralPass = async (session: Session): Promise<void> => {
-    if (await extractSession(ctx, fromSession(session), config.transcriptEvents) !== undefined) return
+    const result = await extractSession(ctx, fromSession(session), config.transcriptEvents)
+    if (result.summary !== undefined || result.unverified.length > 0) return
     const mark = watermarks.get(session.id) ?? seed(session)
     watermarks.set(session.id, mark)
     if (mark.extractedThrough < mark.lastSeq) {
@@ -1121,7 +1213,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // so a stale queued request (an earlier burst's snapshot) must not be
     // summarized after the fresher read.
     for (let index = queue.length - 1; index >= 0; index--) {
-      if (queue[index]!.request.sessionId === session.id) queue.splice(index, 1)
+      if (entrySession(queue[index]!) === session.id) queue.splice(index, 1)
     }
     void (async () => {
       // Final flush of a turn that never closed: headless one-shot sessions
@@ -1130,16 +1222,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       await settleWindow(session, session.events.at(-1)?.seq ?? 0, undefined)
       settledThrough.delete(session.id)
       const { seq: covered } = lastActivity(session.events)
-      const request = await extractSession(ctx, fromSession(session), config.transcriptEvents)
-      if (request === undefined) {
+      const result = await extractSession(ctx, fromSession(session), config.transcriptEvents)
+      // Disposal is decisive for acceptance too: the session is closed, so a
+      // completion without a reply is unverified forever — birth it now.
+      await birthAcceptances(ctx, session.id, result.unverified)
+      if (result.summary === undefined) {
         persistMark(session.id, covered)
         return
       }
       // Disposal is the last chance to read the session, so the cap does not
       // apply here; a walled or failed route parks the request for the next
       // tick — the queue is its only remaining carrier.
-      if (await runSummary(request) === 'ran') persistMark(session.id, covered)
-      else queue.push({ request, readyAt: 0 })
+      if (await runSummary(result.summary) === 'ran') persistMark(session.id, covered)
+      else queue.push({ kind: 'summary', request: result.summary, readyAt: 0 })
     })().catch(error => logger.warn('disposed extraction failed', { sessionId: session.id, error }))
   })
 
@@ -1147,14 +1242,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const now = Date.now()
     if (now < probeHoldUntil) return
     let budget = config.summariesPerTick
-    // Queued requests first: their sessions no longer appear in the live scan
+    // Queued entries first: their sessions no longer appear in the live scan
     // (disposed) or never did (history sweep), so this queue is their only
-    // carrier. Not-yet-ready and over-cap entries wait for a later tick; a
-    // session that came back to life returns to the live scan below, and its
-    // queued snapshot is stale.
-    const held: PendingSummary[] = []
+    // carrier. Not-yet-ready entries wait; a summary over the per-tick cap
+    // waits while an acceptance birth never does (it is model-free); a session
+    // that came back to life returns to the live scan below, and its queued
+    // snapshot is stale.
+    const held: PendingEntry[] = []
     for (const entry of queue.splice(0)) {
-      if (budget <= 0 || entry.readyAt > now || ctx.sessions.get(entry.request.sessionId) !== undefined) {
+      if (entry.readyAt > now || ctx.sessions.get(entrySession(entry)) !== undefined) {
+        held.push(entry)
+        continue
+      }
+      if (entry.kind === 'acceptance') {
+        try {
+          await birthAcceptances(ctx, entry.sessionId, entry.completions)
+          persistMark(entry.sessionId, entry.lastSeq)
+        } catch (error) {
+          logger.warn('acceptance birth threw; re-queued', { sessionId: entry.sessionId, error })
+          held.push(entry)
+        }
+        continue
+      }
+      if (budget <= 0) {
         held.push(entry)
         continue
       }
@@ -1177,8 +1287,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (mark.extractedThrough >= mark.lastSeq) continue
       if (now - mark.lastEventTime < idleMs) continue
       const covered = mark.lastSeq
-      const request = await extractSession(ctx, fromSession(session), config.transcriptEvents)
-      if (request === undefined) {
+      const result = await extractSession(ctx, fromSession(session), config.transcriptEvents)
+      // Idle acceptance births ride before the summary budget: they are
+      // model-free, and the session was silent a full idle window — the human
+      // had their chance to reply to the completion.
+      await birthAcceptances(ctx, session.id, result.unverified)
+      if (result.summary === undefined) {
         mark.extractedThrough = covered
         persistMark(session.id, covered)
         continue
@@ -1186,7 +1300,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // Over-cap sessions defer: the watermark stays behind, so the next tick
       // re-extracts and retries.
       if (budget <= 0) continue
-      const outcome = await runSummary(request)
+      const outcome = await runSummary(result.summary)
       if (outcome !== 'ran') return
       budget--
       // Events appended during the awaits stay ahead of the watermark: only
@@ -1203,11 +1317,17 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    * subagent children (delegation machinery — their work reaches the ledger
    * through the parent's receipt), live sessions (the boot structural pass
    * and the idle scan own them), and ground the durable marks already
-   * covered. A structural resolution covers its session immediately; a
-   * chat-only one queues behind the idle gate anchored to its last stored
-   * event — the same gate the live path applies. The sweep runs detached:
-   * mount must not wait on the whole stored history, and every summary it
-   * queues flows through the tick's cap and probe anyway.
+   * covered. A structural resolution covers its session immediately unless it
+   * left unverified completions, which ride the idle gate like everything the
+   * human may still answer; a chat-only one queues behind the same gate
+   * anchored to its last stored event. One migration: the acceptance tier
+   * postdates marks earlier boots wrote, so the first sweep after the upgrade
+   * re-reads covered ground once — model-free (a covered session's summary
+   * already ran or never applied; only acceptance births and deferred
+   * structural births happen) — before stamping the flag that never re-runs
+   * it. The sweep runs detached: mount must not wait on the whole stored
+   * history, and every model spend it queues flows through the tick's cap
+   * and probe anyway.
    */
   const sweepHistory = async (): Promise<void> => {
     const persistence = ctx.get('sessionPersistence')
@@ -1215,6 +1335,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       logger.info('no session persistence backend mounted; skipping the history sweep')
       return
     }
+    const migrating = marks.flag('acceptance-births') === undefined
     const headers = await persistence.list()
     let extracted = 0
     for (const header of headers) {
@@ -1222,20 +1343,43 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (ctx.sessions.get(header.id) !== undefined) continue
       const inspection = await persistence.inspect(header.id)
       const { seq: lastSeq, time: lastEventTime } = lastActivity(inspection.events)
-      if (marks.covered(header.id) >= lastSeq) continue
+      const covered = marks.covered(header.id) >= lastSeq
+      if (covered && !migrating) continue
       extracted++
-      const request = await extractSession(ctx, {
+      const result = await extractSession(ctx, {
         id: header.id,
         events: inspection.events,
         ...header.cwd === undefined ? {} : { cwd: header.cwd },
       }, config.transcriptEvents)
-      if (request === undefined) {
-        persistMark(header.id, lastSeq)
+      // Already-paid ground: the summary never re-runs; only the acceptance
+      // tier has anything new to say, and the mark stays where it was.
+      if (covered) {
+        if (lastEventTime + idleMs <= Date.now()) await birthAcceptances(ctx, header.id, result.unverified)
+        else if (result.unverified.length > 0) {
+          queue.push({ kind: 'acceptance', sessionId: header.id, lastSeq, completions: result.unverified, readyAt: lastEventTime + idleMs })
+        }
         continue
       }
-      queue.push({ request, readyAt: lastEventTime + idleMs })
+      if (result.summary === undefined) {
+        // The human may still come back to a not-yet-idle session, so
+        // acceptance births wait out the same idle gate as summaries;
+        // everything else structural resolved now. An idle birth covers the
+        // session — the shelved log is frozen, so re-reading could only
+        // re-fold the same completions the dedup would reject.
+        if (lastEventTime + idleMs <= Date.now()) {
+          await birthAcceptances(ctx, header.id, result.unverified)
+          persistMark(header.id, lastSeq)
+        } else if (result.unverified.length > 0) {
+          queue.push({ kind: 'acceptance', sessionId: header.id, lastSeq, completions: result.unverified, readyAt: lastEventTime + idleMs })
+        } else {
+          persistMark(header.id, lastSeq)
+        }
+        continue
+      }
+      queue.push({ kind: 'summary', request: result.summary, readyAt: lastEventTime + idleMs })
     }
-    logger.info('history sweep done', { storedSessions: headers.length, extracted })
+    if (migrating) await marks.setFlag('acceptance-births', new Date().toISOString())
+    logger.info('history sweep done', { storedSessions: headers.length, extracted, migrating })
   }
 
   // Boot sweep: every live session gets one structural pass — restored

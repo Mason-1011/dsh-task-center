@@ -21,6 +21,7 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { SessionId, SessionStore } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { TaskView } from '@task-center/task'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
@@ -30,6 +31,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
 import * as TaskLocal from '@task-center/task-local'
 import { extractSession, isMachinerySession } from '../src/index.ts'
+import { openMarks } from '../src/marks.ts'
 import type { Config } from '../src/index.ts'
 import * as TaskSource from '../src/index.ts'
 
@@ -95,6 +97,30 @@ function goalCreate(objective: string, time: number): SessionEvent<'goal/change'
     goal: { id: GoalId('g-1'), revision: 1, objective, phase: 'active', maxGoalRounds: 5 },
     roundsStarted: 0, createdAt: time, updatedAt: time,
   }, time)
+}
+
+/** One goal/change that completes g-1. */
+function goalComplete(objective: string, time: number): SessionEvent<'goal/change'> {
+  return eventOf('goal/change', {
+    kind: 'goal/change', version: 1, operation: 'edit',
+    goal: { id: GoalId('g-1'), revision: 2, objective, phase: 'complete', maxGoalRounds: 5 },
+    roundsStarted: 0, createdAt: time, updatedAt: time,
+  }, time)
+}
+
+/** The snake-shaped fixture: work the model finished and no human ever answered. */
+function snakeEvents(now: number, ageMs = 4 * HOUR): SessionEvent[] {
+  return renumber([
+    userMessage('给我做个贪吃蛇网页', now - ageMs),
+    goalCreate('贪吃蛇网页', now - ageMs + 1),
+    goalComplete('贪吃蛇网页', now - ageMs + 2),
+    assistantMessage('完成了,打开 snake.html 就能玩。', now - ageMs + 3),
+  ])
+}
+
+/** Born acceptance tasks: the review-status work awaiting a human verdict. */
+function reviews(ctx: Context): TaskView[] {
+  return ctx.tasks.list({}).filter(task => task.record.status === 'review')
 }
 
 /** One plugin mount handle for reverse-order teardown. */
@@ -219,7 +245,7 @@ describe('machinery guard', () => {
     ])
     for (const id of ['summary-s-9-9', 'wake-abcd12-9', 'patrol-2026-09-09-9']) {
       const session = { id: SessionId(id), events }
-      expect(await extractSession(ctx, session, 10)).toBeUndefined()
+      expect(await extractSession(ctx, session, 10)).toEqual({ unverified: [] })
     }
     expect(ctx.tasks.candidates()).toHaveLength(0)
     await fiber.dispose()
@@ -301,6 +327,98 @@ describe('fresh-install history sweep', () => {
     await new Promise(resolve => setTimeout(resolve, 400))
     expect(secondAdapter.inputs.filter(text => text.includes('[task-source]'))).toHaveLength(0)
     expect(second.ctx.tasks.candidates()).toHaveLength(2)
+    await shutdown(second.fibers)
+  })
+
+  it('sweeps a shelved done-but-unanswered session into a review task, model-free', { timeout: 8_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-snake', snakeEvents(Date.now()))
+    await shutdown(author.fibers)
+
+    const extractor = await bootExtractor(sessionsRoot, marksRoot)
+    const adapter = new VerdictAdapter(TASK_VERDICT)
+    extractor.ctx.llm.registerAdapter(['unused'], adapter)
+    await extractor.ctx.plugin(TaskSource, sourceConfig('unused'))
+    await until(() => reviews(extractor.ctx).length === 1)
+    const born = reviews(extractor.ctx)[0]!
+    expect(born.record).toMatchObject({
+      objective: '贪吃蛇网页',
+      status: 'review',
+      origin: { sessionId: SessionId('s-snake'), goalId: 'g-1' },
+    })
+    expect(born.record.holder).toBeUndefined()
+    expect(born.record.contextPack).toContain('SUBMITTED: ')
+    // The finished goal never waited in 待确认 either, and no model was paid.
+    expect(extractor.ctx.tasks.candidates()).toHaveLength(0)
+    expect(adapter.inputs).toHaveLength(0)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(extractor.fibers)
+  })
+
+  it('holds a fresh done-but-unanswered session until its idle window passes, then a later boot births', { timeout: 8_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-snake', snakeEvents(Date.now(), 1_000))
+    await shutdown(author.fibers)
+
+    const first = await bootExtractor(sessionsRoot, marksRoot)
+    const firstAdapter = new VerdictAdapter(TASK_VERDICT)
+    first.ctx.llm.registerAdapter(['unused'], firstAdapter)
+    await first.ctx.plugin(TaskSource, sourceConfig('unused', { idleHours: 1 }))
+    await new Promise(resolve => setTimeout(resolve, 400))
+    // The human may still answer inside the window: nothing births, nothing pays.
+    expect(reviews(first.ctx)).toHaveLength(0)
+    expect(firstAdapter.inputs).toHaveLength(0)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(first.fibers)
+
+    // The mark stayed behind (nothing covered), so a boot with a shorter
+    // window re-reads the session and births the acceptance task.
+    const second = await bootExtractor(sessionsRoot, marksRoot)
+    await second.ctx.plugin(TaskSource, sourceConfig('unused', { idleHours: 0.0001 }))
+    await until(() => reviews(second.ctx).length === 1)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(second.fibers)
+  })
+
+  it('re-reads ground covered before the acceptance tier existed, birthing exactly once', { timeout: 8_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-snake', snakeEvents(Date.now()))
+    await shutdown(author.fibers)
+
+    const extractor = await bootExtractor(sessionsRoot, marksRoot)
+    const adapter = new VerdictAdapter(TASK_VERDICT)
+    extractor.ctx.llm.registerAdapter(['unused'], adapter)
+    // Simulate the earlier era: a pre-acceptance boot already covered the
+    // session through its tail.
+    const facility = extractor.ctx.get('storageDomain')
+    if (facility === undefined) throw new Error('storage domain facility missing')
+    const seeded = await openMarks(facility)
+    await seeded.marks.advance(SessionId('s-snake'), 3)
+    await seeded.close()
+    await extractor.ctx.plugin(TaskSource, sourceConfig('unused'))
+    // The one-time migration re-reads covered ground model-free and births.
+    await until(() => reviews(extractor.ctx).length === 1)
+    expect(adapter.inputs).toHaveLength(0)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(extractor.fibers)
+
+    // The flag is stamped: a later boot neither re-reads nor re-births.
+    const second = await bootExtractor(sessionsRoot, marksRoot)
+    const secondAdapter = new VerdictAdapter(TASK_VERDICT)
+    second.ctx.llm.registerAdapter(['unused'], secondAdapter)
+    await second.ctx.plugin(TaskSource, sourceConfig('unused'))
+    await new Promise(resolve => setTimeout(resolve, 400))
+    expect(reviews(second.ctx)).toHaveLength(1)
+    expect(secondAdapter.inputs).toHaveLength(0)
     await shutdown(second.fibers)
   })
 

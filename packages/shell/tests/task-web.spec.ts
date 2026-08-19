@@ -153,6 +153,24 @@ describe('task-web host', () => {
     assertNoUndefined(approved)
   })
 
+  it('carries an acceptance birth onto the board and back to the claimable backlog on reject', async () => {
+    const born = await ctx.tasks.acceptanceCreate({
+      objective: '贪吃蛇做好了',
+      completionNote: '目标已在来源会话标记完成,其后无人回应',
+      sessionId: SessionId('s-board-done'),
+      goalId: 'g-1',
+    }, { kind: 'source' })
+    if ('code' in born) throw new Error(born.code)
+
+    const payload: BoardPayload = ctx['task-board'].board()
+    assertNoUndefined(payload)
+    expect(payload.tasks.find(task => task.id === born.record.id)).toMatchObject({ objective: '贪吃蛇做好了', status: 'review' })
+
+    const rejected = await ctx['task-board'].act(born.record.id, born.record.revision, 'reject', '样式不对')
+    expect(rejected).toMatchObject({ ok: true, status: 'todo' })
+    assertNoUndefined(rejected)
+  })
+
   it('surfaces compare-and-set races as TASK_STALE_REVISION instead of throwing', async () => {
     const handle = await ctx.tasks.create({ objective: '竞态', acceptance: 'x' }, { kind: 'human' })
     if ('code' in handle) throw new Error(handle.code)
@@ -333,7 +351,8 @@ describe('task-web host', () => {
     if (!promoted.ok) throw new Error(promoted.code)
     const task = ctx.tasks.get(TaskId(promoted.taskId))
     expect(task?.record).toMatchObject({ objective: '完整暗色支持', acceptance: '切换后全部界面生效' })
-    expect(task?.record.origin?.candidateId).toBe(born.record.id)
+    const promotedOrigin = task?.record.origin
+    expect(promotedOrigin !== undefined && 'candidateId' in promotedOrigin && promotedOrigin.candidateId === born.record.id).toBe(true)
     // Promoted work leaves the 待确认 column.
     expect(ctx['task-board'].board().candidates.find(card => card.id === born.record.id)).toBeUndefined()
     // A stale revision surfaces the compare-and-set code, like act.

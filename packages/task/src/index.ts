@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { applyCandidateMutation, applyMutation, applyProjectMutation, fold } from './fold.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
@@ -202,6 +202,35 @@ export class TaskService extends Service {
   }
 
   /**
+   * Birth one task straight into review (source extractor only): a session's
+   * goal completed without a human reply, so the declared completion surfaces
+   * for the human verdict — approve closes it, reject returns it to the
+   * claimable backlog. Same-origin dedup mirrors candidates: a task from this
+   * exact session-and-goal origin already exists in any status — the
+   * extractor's re-trigger finds it here and does not double-create. No
+   * withdrawal handle: the work is real and already done, so nothing here
+   * auto-abandons it.
+   */
+  async acceptanceCreate(input: { objective: string; completionNote: string; sessionId: SessionId; goalId: string }, actor: TaskActor): Promise<TaskView | TaskError> {
+    if (actor.kind !== 'source') return { code: 'TASK_FORBIDDEN', message: 'acceptance births are the source extractor\'s alone' }
+    const origin: TaskOrigin = { sessionId: input.sessionId, goalId: input.goalId }
+    const existing = this.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
+      .find(view => {
+        const born = view.record.origin
+        return born !== undefined && 'goalId' in born && born.goalId === origin.goalId && born.sessionId === origin.sessionId
+      })
+    if (existing !== undefined) {
+      return { code: 'TASK_DUPLICATE_ORIGIN', message: 'a task from this acceptance origin already exists' }
+    }
+    const taskId = TaskId(randomUUID())
+    return this.commit(taskId, {
+      operation: 'create', taskId,
+      objective: input.objective, acceptance: '',
+      origin, completionNote: input.completionNote,
+    }, actor)
+  }
+
+  /**
    * Create one task. The handle's disposer abandons the task (legal only
    * before the first claim, which withdrawal enforces by error).
    */
@@ -300,7 +329,10 @@ export class TaskService extends Service {
     }
     // Crash recovery: the task commit below landed but the promote commit did not.
     const promoted = this.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
-      .find(view => view.record.origin?.candidateId === candidateId)
+      .find(view => {
+        const born = view.record.origin
+        return born !== undefined && 'candidateId' in born && born.candidateId === candidateId
+      })
     if (promoted !== undefined) {
       return { code: 'CANDIDATE_ALREADY_EXISTS', message: `candidate was already promoted as task ${promoted.record.id}` }
     }
