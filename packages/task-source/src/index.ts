@@ -35,9 +35,12 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-// Type-only: carries the agent subject event declarations (`agent/error`)
-// into src-only builds; the listener never touches a runtime export.
-import type {} from '@deepseek-ai/dsh-agent'
+// Type-only: carries the agent subject event declarations (`agent/error`) and
+// the `AgentSetup` composition hook into src-only builds; no runtime export.
+import type { AgentSetup } from '@deepseek-ai/dsh-agent'
+// Runtime import: `resolveSessionPreset` reads the preset a session's own log
+// records, and the module's Context augmentation names the roster service.
+import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 import type { GoalChangeMeta, GoalPhase } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
@@ -47,7 +50,7 @@ import type { Session, SessionEvent, TodoItem, UserMessage } from '@deepseek-ai/
 // build program; the sweep reads it optionally through `ctx.get`.
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 // Type-only: carries the `tasks` service augmentation into the build program.
-import type { TaskActor } from '@task-center/task'
+import type { TaskActor, TaskId } from '@task-center/task'
 import { memoryMarks, openMarks } from './marks.ts'
 import type { Marks } from './marks.ts'
 
@@ -300,16 +303,24 @@ export interface UnverifiedCompletion {
  * while its latest completing change stands (a later edit, resume, or clear
  * takes it out — unfinished goals are the candidate tier's business) AND no
  * human message follows that change: any later human line means the person
- * came back, saw the result, and had their chance to object.
+ * came back, saw the result, and had their chance to object. A `task/change`
+ * submit receipt after the change also takes it out: the session held a task
+ * and the goal mirror submitted it, so the completion already reached the
+ * ledger — the acceptance tier surfaces work that never entered it.
  * @param events - the complete session log, in seq order.
  * @returns the unverified completions, in completion order.
  */
 export function foldUnverifiedCompletions(events: readonly SessionEvent[]): readonly UnverifiedCompletion[] {
   const standing = new Map<string, UnverifiedCompletion & { seq: number }>()
-  let lastHumanSeq = -1
+  // The seq through which the completion was already answered: a later human
+  // line (the person came back) or a later submit receipt (the mirror surfaced
+  // it into the ledger).
+  let answeredThrough = -1
   for (const event of events) {
     if (event.type === 'user/message') {
-      if (event.data.source.kind === 'user') lastHumanSeq = event.seq
+      if (event.data.source.kind === 'user') answeredThrough = event.seq
+    } else if (event.type === 'task/change') {
+      if (event.data.mutation.operation === 'submit') answeredThrough = event.seq
     } else if (event.type === 'goal/change') {
       const change: GoalChangeMeta = event.data
       if (change.operation === 'clear') {
@@ -322,7 +333,7 @@ export function foldUnverifiedCompletions(events: readonly SessionEvent[]): read
     }
   }
   return [...standing.values()]
-    .filter(completion => completion.seq > lastHumanSeq)
+    .filter(completion => completion.seq > answeredThrough)
     .map(({ seq, ...completion }) => completion)
     .sort((left, right) => left.completedAtSeq - right.completedAtSeq)
 }
@@ -349,6 +360,82 @@ async function birthAcceptances(ctx: Context, sessionId: SessionId, completions:
     if ('code' in created) {
       logger.warn('acceptance birth rejected', { sessionId, goalId: completion.goalId, code: created.code })
     }
+  }
+}
+
+/**
+ * Push one rejection back into the conversation that did the work. The
+ * human's verdict rides as a user message (the board is that human's other
+ * mouth), and a holderless task is claimed on the conversation's behalf
+ * first, so the claim's context injection precedes the message and the model
+ * reworks with the pack in view; a rejection that kept the holder skips the
+ * claim — the redo is already that conversation's. Rework completion
+ * resubmits through the ordinary task
+ * discipline — `task_report` into review, or a fresh goal's complete mirror
+ * (the rejected goal itself is terminal: `complete` never transitions back).
+ * A shelved source session is resumed from persistence for one turn and
+ * released after it; the message stays in its log whatever happens — a
+ * failed route parks the verdict there for the next opening.
+ * @param ctx - Context carrying `tasks` and `agents`.
+ * @param config - the extractor config (the push turn rides the same route as the summarizer).
+ * @param sessionId - the source session that completed the work.
+ * @param taskId - the rejected acceptance-born task.
+ * @param objective - the task's objective, quoted back to the model.
+ * @param reason - the human's rejection reason, verbatim.
+ */
+/**
+ * The resume-time composition for a pushed-back session: join the agent to the
+ * preset its own log recorded. Every session the api-proxy opens carries this
+ * join; a programmatic `agents.resume` without one composes the agent on
+ * host-layer tools alone, so the rework turn would hear `unknown tool` for
+ * every file or shell call its original session made. Without a preset roster
+ * or a persistence backend (tests, minimal assemblies) the setup composes
+ * nothing — the api-proxy's own no-roster behavior.
+ *
+ * @param ctx - plugin context carrying the optional roster and persistence services.
+ * @param sessionId - the session about to be resumed.
+ * @returns the setup for `agents.resume`; mounts the recorded preset, or the roster default when the log records none.
+ */
+async function recordedPresetSetup(ctx: Context, sessionId: SessionId): Promise<AgentSetup> {
+  const presets = ctx.get('agentPresets')
+  const persistence = ctx.get('sessionPersistence')
+  if (presets === undefined || persistence === undefined) return () => {}
+  const header = (await persistence.list()).find(candidate => candidate.id === sessionId)
+  if (header === undefined) return () => {}
+  const { events } = await persistence.inspect(sessionId)
+  const presetId = resolveSessionPreset({ header, events })
+  return async agentCtx => {
+    await presets.mount(agentCtx, presetId)
+  }
+}
+
+async function pushRejection(ctx: Context, config: Config, sessionId: SessionId, taskId: TaskId, objective: string, reason: string): Promise<void> {
+  const logger = ctx.logger('task-source')
+  const live = ctx.agents.get(sessionId)
+  const handle = live === undefined
+    ? await ctx.agents.resume({
+        resumeSessionId: sessionId,
+        agentOptions: config.agent,
+        setup: await recordedPresetSetup(ctx, sessionId),
+      })
+    : undefined
+  const agent = live ?? handle!.agent
+  try {
+    // A rejection keeps the holder when there is one, so only a holderless
+    // round needs the claim (and its context injection); a held round is
+    // already this conversation's to redo.
+    if (ctx.tasks.get(taskId)?.record.holder !== sessionId) {
+      const claimed = await ctx.tasks.claim(taskId, agent.session, { kind: 'model', sessionId })
+      if ('code' in claimed) logger.warn('rejection claim rejected', { sessionId, taskId, code: claimed.code })
+    }
+    const idle = agent.whenIdle()
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: `你之前完成的「${objective}」经人工验收被打回。打回理由:${reason}。该任务已回到你名下(已代你认领),请按理由修正后重新完成;完成时用 task_report 提交(outcome 为 review)即可,系统会再次进入待验收。` }],
+      source: { kind: 'user' },
+    }))
+    await idle
+  } finally {
+    await handle?.dispose()
   }
 }
 
@@ -1201,10 +1288,31 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     await mirrorHeldTasks(ctx, session.id, foldGoalMirrors(session.events, mark, endSeq), receipt)
   }
 
+  // In-flight settlements per session, chained in turn order. Disposal awaits
+  // the chain before its final read, so a mirror submit an ending turn
+  // started is already in the log the disposed extraction folds.
+  const settling = new Map<SessionId, Promise<void>>()
+  const settle = (session: Session, endSeq: number, receipt: Session | undefined): void => {
+    const run = (settling.get(session.id) ?? Promise.resolve())
+      .then(() => settleWindow(session, endSeq, receipt))
+      .catch(error => logger.warn('turn reflow failed', { sessionId: session.id, error }))
+    settling.set(session.id, run)
+  }
+
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'turn/end') return
-    void settleWindow(session, event.seq, session)
-      .catch(error => logger.warn('turn reflow failed', { sessionId: session.id, error }))
+    settle(session, event.seq, session)
+  })
+
+  // The rejection loop's front half: a rejected acceptance-born task goes back
+  // to the conversation that did the work, reason attached. The mirror's
+  // resubmit on rework completion is the back half (goal phase → `submit`).
+  ctx.on('task/changed', ({ mutation, task }) => {
+    if (mutation.operation !== 'reject') return
+    const { origin } = task.record
+    if (origin === undefined || !('goalId' in origin)) return
+    void pushRejection(ctx, config, origin.sessionId, task.record.id, task.record.objective, mutation.reason)
+      .catch(error => logger.warn('rejection push failed', { sessionId: origin.sessionId, error }))
   })
 
   ctx.on('session/disposed', session => {
@@ -1216,11 +1324,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (entrySession(queue[index]!) === session.id) queue.splice(index, 1)
     }
     void (async () => {
+      // A settlement an ending turn started may still be writing its mirror
+      // submit; the final read must fold the receipt, not race it.
+      await settling.get(session.id)
       // Final flush of a turn that never closed: headless one-shot sessions
       // often die mid-turn, and disposal is the last chance to settle. No
       // receipt — the session's log is closed.
       await settleWindow(session, session.events.at(-1)?.seq ?? 0, undefined)
       settledThrough.delete(session.id)
+      settling.delete(session.id)
       const { seq: covered } = lastActivity(session.events)
       const result = await extractSession(ctx, fromSession(session), config.transcriptEvents)
       // Disposal is decisive for acceptance too: the session is closed, so a
@@ -1389,6 +1501,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     await structuralPass(session)
   }
   void sweepHistory().catch(error => logger.warn('history sweep failed', { error }))
+  // Rejection-loop reconciliation: the push listener hears the reject as it
+  // commits, but a verdict that landed while this plugin (or a version of it
+  // without the push) was down never reached its source session — the verdict
+  // is durable in the ledger, its delivery is not. A successful push always
+  // claims the task out of todo, so an acceptance-born task still sitting
+  // holderless in todo on a ledger that ends in reject is an undelivered
+  // verdict; re-push it with the recorded reason. A failed route leaves the
+  // task exactly as it was, so the next boot retries.
+  void (async () => {
+    for (const view of ctx.tasks.list({})) {
+      const { id, holder, status, origin } = view.record
+      if (status !== 'todo' || holder !== undefined || origin === undefined || !('goalId' in origin)) continue
+      const last = ctx.tasks.changes(id).at(-1)
+      if (last === undefined || last.change.kind !== 'task/change' || last.change.mutation.operation !== 'reject') continue
+      await pushRejection(ctx, config, origin.sessionId, id, view.record.objective, last.change.mutation.reason)
+    }
+  })().catch(error => logger.warn('rejection reconciliation failed', { error }))
   await tick()
   const timer = setInterval(() => void tick().catch(error => logger.warn('tick failed', { error })), config.pollSeconds * 1000)
   ctx.effect(() => () => clearInterval(timer))

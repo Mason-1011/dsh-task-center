@@ -21,8 +21,8 @@ import { Session, SessionId, SessionStore } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import type { CandidateView } from '@task-center/task'
+import { TaskService, TaskId } from '@task-center/task'
+import type { CandidateView, TaskMutation, TaskView } from '@task-center/task'
 import { buildSummaryPrompt, extractSession, foldApprovedPlan, foldGoals, foldTodos, foldUnverifiedCompletions, parseVerdict, summarize } from '../src/index.ts'
 import type { Config, SummaryRequest } from '../src/index.ts'
 import * as TaskSource from '../src/index.ts'
@@ -95,6 +95,22 @@ function eventOf<K extends SessionEvent['type']>(type: K, data: SessionEvent<K>[
 /** Renumber a mixed event list into a contiguous log. */
 function renumber(events: readonly SessionEvent[]): SessionEvent[] {
   return events.map((event, index) => ({ ...event, seq: index }))
+}
+
+/**
+ * A `task/change` receipt as the task seam writes one. The fabricated `task`
+ * view is opaque to every reader here (the fold reads the mutation only), so
+ * one cast stands in for the full projection.
+ */
+function taskChange(mutation: TaskMutation, time: number): SessionEvent<'task/change'> {
+  return eventOf('task/change', {
+    kind: 'task/change', version: 1,
+    operation: mutation.operation,
+    taskId: TaskId('t-1'),
+    revision: 1,
+    mutation,
+    task: {} as TaskView,
+  }, time)
 }
 
 /** A user/message event; a plugin notice passes its own `source`. */
@@ -324,6 +340,20 @@ describe('foldUnverifiedCompletions', () => {
       { goalId: 'g-2', objective: '首屏优化', completedAtSeq: 0 },
       { goalId: 'g-1', objective: '支持暗色模式', completedAtSeq: 1 },
     ])
+  })
+
+  it('un-stands a completion a later submit receipt answered: the mirror surfaced it', () => {
+    const events = renumber([
+      ...seed([[goal('complete', 'g-1', 2, 'complete'), 1_000]]),
+      taskChange({ operation: 'submit', completionNote: '重做完毕' }, 2_000),
+    ])
+    expect(foldUnverifiedCompletions(events)).toEqual([])
+    // A receipt before the completion answers nothing.
+    const reversed = renumber([
+      taskChange({ operation: 'submit', completionNote: '早先的提交' }, 1_000),
+      ...seed([[goal('complete', 'g-1', 2, 'complete'), 2_000]]),
+    ])
+    expect(foldUnverifiedCompletions(reversed)).toEqual([{ goalId: 'g-1', objective: '支持暗色模式', completedAtSeq: 1 }])
   })
 })
 

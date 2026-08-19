@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import LlmRuntime, { createUserMessage, MessageId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, MessageId, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalChangeMeta } from '@deepseek-ai/dsh-goal'
 import { Session, SessionId, SessionStore } from '@deepseek-ai/dsh-session'
@@ -412,11 +412,13 @@ describe('goal mirror', () => {
     await ctx.plugin(TaskSource, sourceConfig())
     parkedSession.append('goal/change', {
       kind: 'goal/change', version: 1, operation: 'block',
-      goal: { id: GoalId('g-7'), revision: 1, objective: '批量翻译', phase: 'blocked', blockedReason: { code: 'QUOTA_EXCEEDED', message: '额度用尽' }, maxGoalRounds: 5 },
+      goal: { id: GoalId('g-7'), revision: 1, objective: '批量翻译', phase: 'blocked', blockedReason: { code: QUOTA_EXCEEDED_CODE, message: '额度用尽' }, maxGoalRounds: 5 },
       roundsStarted: 0, createdAt: now, updatedAt: now + 3,
     })
     parkedSession.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
     await until(() => ctx.tasks.get(parkedView.record.id)!.record.contextPack.includes('自动回流'))
+    // Let the settle window finish before judging its end state.
+    await new Promise(resolve => setTimeout(resolve, 200))
     // Quota is task-quota's lifecycle: the mirror left the state alone.
     expect(ctx.tasks.get(parkedView.record.id)!.record.status).toBe('active')
 

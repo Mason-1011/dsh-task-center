@@ -13,14 +13,14 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, { createUserMessage, LlmAdapter, MessageId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { SessionId, SessionStore } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { TaskView } from '@task-center/task'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -99,22 +99,28 @@ function goalCreate(objective: string, time: number): SessionEvent<'goal/change'
   }, time)
 }
 
-/** One goal/change that completes g-1. */
+/** One goal/change that completes g-1 — the real `complete` verb, revision 2. */
 function goalComplete(objective: string, time: number): SessionEvent<'goal/change'> {
   return eventOf('goal/change', {
-    kind: 'goal/change', version: 1, operation: 'edit',
+    kind: 'goal/change', version: 1, operation: 'complete',
     goal: { id: GoalId('g-1'), revision: 2, objective, phase: 'complete', maxGoalRounds: 5 },
     roundsStarted: 0, createdAt: time, updatedAt: time,
   }, time)
 }
 
-/** The snake-shaped fixture: work the model finished and no human ever answered. */
+/** The snake-shaped fixture: one closed historical turn of work the model
+ * finished and no human ever answered. The turn markers matter to the
+ * rejection push: a resumed session seeds its settle window from the last
+ * closed turn, keeping the historical completion out of the push turn's
+ * mirror — the real loop writes exactly these markers. */
 function snakeEvents(now: number, ageMs = 4 * HOUR): SessionEvent[] {
   return renumber([
-    userMessage('给我做个贪吃蛇网页', now - ageMs),
-    goalCreate('贪吃蛇网页', now - ageMs + 1),
-    goalComplete('贪吃蛇网页', now - ageMs + 2),
-    assistantMessage('完成了,打开 snake.html 就能玩。', now - ageMs + 3),
+    eventOf('turn/start', { turn: 1 }, now - ageMs),
+    userMessage('给我做个贪吃蛇网页', now - ageMs + 1),
+    goalCreate('贪吃蛇网页', now - ageMs + 2),
+    goalComplete('贪吃蛇网页', now - ageMs + 3),
+    assistantMessage('完成了,打开 snake.html 就能玩。', now - ageMs + 4),
+    eventOf('turn/end', { turn: 1, reason: { kind: 'completed' } }, now - ageMs + 5),
   ])
 }
 
@@ -164,7 +170,7 @@ async function shutdown(fibers: Fiber[]): Promise<void> {
 }
 
 /** Store one session's history under the author context, then release it. */
-async function storeSession(author: { ctx: Context }, id: string, events: readonly SessionEvent[], meta?: { cwd?: string }): Promise<void> {
+async function storeSession(author: { ctx: Context }, id: string, events: readonly SessionEvent[], meta?: { cwd?: string; agentPreset?: string }): Promise<void> {
   author.ctx.sessions.create(SessionId(id), { seed: events, ...meta === undefined ? {} : { meta } })
   // The write path batches; give it a beat before anything reads the files.
   await new Promise(resolve => setTimeout(resolve, 100))
@@ -176,6 +182,27 @@ async function until(predicate: () => boolean, ms = 5_000): Promise<void> {
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error('condition not met before the deadline')
     await new Promise(resolve => setTimeout(resolve, 20))
+  }
+}
+
+/** A preset-roster double: records the joins the push path installs. */
+class RecordingRoster extends Service {
+  static inject = [] as const
+
+  /** Preset id of every mount call, in order. */
+  readonly joins: Array<string | undefined> = []
+
+  constructor(ctx: Context) {
+    super(ctx, 'agentPresets')
+  }
+
+  async resolve(id?: string): Promise<{ id: string }> {
+    return { id: id ?? 'default-preset' }
+  }
+
+  async mount(_agentCtx: Context, id?: string): Promise<{ id: string }> {
+    this.joins.push(id)
+    return { id: id ?? 'default-preset' }
   }
 }
 
@@ -420,6 +447,214 @@ describe('fresh-install history sweep', () => {
     expect(reviews(second.ctx)).toHaveLength(1)
     expect(secondAdapter.inputs).toHaveLength(0)
     await shutdown(second.fibers)
+  })
+
+  it('pushes a board rejection back into the shelved source session: claimed, driven, no phantom resubmission', { timeout: 15_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-snake', snakeEvents(Date.now()), { agentPreset: 'snake-preset' })
+    await shutdown(author.fibers)
+
+    const extractor = await bootExtractor(sessionsRoot, marksRoot)
+    const roster = new RecordingRoster(extractor.ctx)
+    const adapter = new VerdictAdapter('收到,我马上按理由修正。')
+    extractor.ctx.llm.registerAdapter(['push-route'], adapter)
+    await extractor.ctx.plugin(TaskSource, sourceConfig('push-route'))
+    await until(() => reviews(extractor.ctx).length === 1)
+    const born = reviews(extractor.ctx)[0]!
+
+    // The scripted turn runs in milliseconds, faster than any liveness poll:
+    // capture the resumed session through its first appended event (the
+    // claim's pack receipt), registered before the verdict that starts it all.
+    let pushed: Session | undefined
+    extractor.ctx.on('session/event', (session, event) => {
+      if (session.id === SessionId('s-snake') && event.type === 'task/context-injected') pushed = session
+    })
+
+    // The human's board verdict: rejected with a reason.
+    const rejected = await extractor.ctx.tasks.mutate(
+      born.record.id, born.record.revision,
+      { operation: 'reject', reason: '撞墙后没有结束画面' },
+      { kind: 'human' },
+    )
+    if ('code' in rejected) throw new Error(rejected.code)
+
+    // The shelved source session comes back live, the task claimed on its behalf.
+    await until(() => pushed !== undefined)
+    await until(() => {
+      const view = extractor.ctx.tasks.get(born.record.id)
+      return view !== undefined && view.record.status === 'active' && view.record.holder === SessionId('s-snake')
+    })
+    // The verdict reached the model route and the scripted answer closed the
+    // turn (the capture records only each request's first user text — in a
+    // resumed conversation that is the historical prompt, not the reason).
+    await until(() => pushed!.events.some(event =>
+      event.type === 'assistant/message'
+      && event.data.message.content.some(block => block.type === 'text' && block.text === '收到,我马上按理由修正。'),
+    ))
+    expect(adapter.inputs).toHaveLength(1)
+    // The turn's settle and the one-shot dispose's final extraction follow;
+    // the storage writes behind them need a beat.
+    await new Promise(resolve => setTimeout(resolve, 300))
+
+    // The claim's pack injection precedes the pushed message: the model read
+    // the task before the reason, and the verdict rode as the human's line.
+    const events = pushed!.events
+    const injected = events.find(event => event.type === 'task/context-injected')?.seq
+    const push = events.find(event =>
+      event.type === 'user/message'
+      && event.data.source.kind === 'user'
+      && event.data.content.some(block => block.type === 'text' && block.text.includes('撞墙后没有结束画面')),
+    )?.seq
+    expect(injected).toBeDefined()
+    expect(push).toBeDefined()
+    expect(injected!).toBeLessThan(push!)
+    // The push turn carried no goal change — the historical completion stays
+    // outside the settle window — and no rework happened: the task stays
+    // claimed and active, not back in review, and no second task was born.
+    const after = extractor.ctx.tasks.get(born.record.id)!
+    expect(after.record.status).toBe('active')
+    expect(after.record.holder).toBe(SessionId('s-snake'))
+    expect(reviews(extractor.ctx)).toHaveLength(0)
+    expect(extractor.ctx.tasks.list({})).toHaveLength(1)
+    // The resume joined the session's recorded preset — without that join the
+    // rework turn would see host-layer tools only, exactly the deployment gap
+    // this test pins. One resume, one mount, the log's own value.
+    expect(roster.joins).toEqual(['snake-preset'])
+    await shutdown(extractor.fibers)
+  })
+
+  it('re-pushes at boot a rejection that landed while the push code was not running', { timeout: 15_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-snake', snakeEvents(Date.now()))
+    await shutdown(author.fibers)
+
+    // Era one: an extractor without the push (the fiber is disposed before the
+    // verdict) births the review task, then the human rejects on the board —
+    // the commit fires with no listener alive, exactly a version-skew or
+    // crash-between-commit-and-push.
+    const extractor = await bootExtractor(sessionsRoot, marksRoot)
+    const adapter = new VerdictAdapter('收到,这就改。')
+    extractor.ctx.llm.registerAdapter(['push-route'], adapter)
+    const firstSource = await extractor.ctx.plugin(TaskSource, sourceConfig('push-route'))
+    await until(() => reviews(extractor.ctx).length === 1)
+    const born = reviews(extractor.ctx)[0]!
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await firstSource.dispose()
+    const rejected = await extractor.ctx.tasks.mutate(
+      born.record.id, born.record.revision,
+      { operation: 'reject', reason: '蛇的颜色太艳,刺眼' },
+      { kind: 'human' },
+    )
+    if ('code' in rejected) throw new Error(rejected.code)
+
+    // Era two: the push code boots over the same ledger and sessions. The
+    // boot reconciliation finds the undelivered verdict — a successful push
+    // always claims out of todo, so a holderless todo on a ledger ending in
+    // reject is exactly that — and delivers the recorded reason.
+    let pushed: Session | undefined
+    extractor.ctx.on('session/event', (session, event) => {
+      if (session.id === SessionId('s-snake') && event.type === 'task/context-injected') pushed = session
+    })
+    await extractor.ctx.plugin(TaskSource, sourceConfig('push-route'))
+    await until(() => pushed !== undefined)
+    await until(() => {
+      const view = extractor.ctx.tasks.get(born.record.id)
+      return view !== undefined && view.record.status === 'active' && view.record.holder === SessionId('s-snake')
+    })
+    const message = pushed!.events.find(event =>
+      event.type === 'user/message'
+      && event.data.source.kind === 'user'
+      && event.data.content.some(block => block.type === 'text' && block.text.includes('蛇的颜色太艳,刺眼')),
+    )
+    expect(message).toBeDefined()
+    expect(extractor.ctx.tasks.list({})).toHaveLength(1)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await shutdown(extractor.fibers)
+  })
+
+  it('re-pushes a second rejection over a log that already carries task receipts', { timeout: 20_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    await storeSession(author, 's-snake', snakeEvents(Date.now()))
+    await shutdown(author.fibers)
+
+    const extractor = await bootExtractor(sessionsRoot, marksRoot)
+    const adapter = new VerdictAdapter('收到,我马上按理由修正。')
+    extractor.ctx.llm.registerAdapter(['push-route'], adapter)
+    await extractor.ctx.plugin(TaskSource, sourceConfig('push-route'))
+    await until(() => reviews(extractor.ctx).length === 1)
+    const born = reviews(extractor.ctx)[0]!
+
+    // The live source session, re-captured on every push's reason message —
+    // each push resumes a fresh object over the same persisted log, and a
+    // held round writes no claim receipt to re-capture on.
+    let live: Session | undefined
+    extractor.ctx.on('session/event', (session, event) => {
+      if (session.id === SessionId('s-snake') && event.type === 'user/message') live = session
+    })
+
+    // Round one: rejected, pushed, the rework turn runs.
+    const first = await extractor.ctx.tasks.mutate(
+      born.record.id, born.record.revision,
+      { operation: 'reject', reason: '移动速度太快' },
+      { kind: 'human' },
+    )
+    if ('code' in first) throw new Error(first.code)
+    await until(() => {
+      const view = extractor.ctx.tasks.get(born.record.id)
+      return view !== undefined && view.record.status === 'active' && view.record.holder === SessionId('s-snake')
+    })
+    await until(() => live!.events.some(event =>
+      event.type === 'assistant/message'
+      && event.data.message.content.some(block => block.type === 'text' && block.text === '收到,我马上按理由修正。'),
+    ))
+    await new Promise(resolve => setTimeout(resolve, 300))
+
+    // The model's rework report: a model-actor submit through the live session
+    // writes a task/change receipt into the log — the receipt a second resume
+    // must not choke on.
+    const claimed = extractor.ctx.tasks.get(born.record.id)!
+    const submitted = await extractor.ctx.tasks.mutate(
+      claimed.record.id, claimed.record.revision,
+      { operation: 'submit', completionNote: '速度整体调慢了' },
+      { kind: 'model', sessionId: SessionId('s-snake') }, live!,
+    )
+    if ('code' in submitted) throw new Error(submitted.code)
+    expect(live!.events.filter(event => event.type === 'task/change').length).toBeGreaterThanOrEqual(2)
+
+    // Round two: the redo is rejected again — the push resumes the log that
+    // now carries receipts and delivers the second reason.
+    const second = await extractor.ctx.tasks.mutate(
+      born.record.id, submitted.record.revision,
+      { operation: 'reject', reason: '还是有点快,再慢一档' },
+      { kind: 'human' },
+    )
+    if ('code' in second) throw new Error(second.code)
+    // The second rejection kept the holder: the redo is the same
+    // conversation's, so the push claims nothing this round.
+    expect(second.record.status).toBe('active')
+    expect(second.record.holder).toBe(SessionId('s-snake'))
+    await until(() => live!.events.some(event =>
+      event.type === 'user/message'
+      && event.data.source.kind === 'user'
+      && event.data.content.some(block => block.type === 'text' && block.text.includes('还是有点快,再慢一档')),
+    ))
+    // The rework turn ran over the receipt-bearing log: a second model reply.
+    await until(() => live!.events.filter(event =>
+      event.type === 'assistant/message'
+      && event.data.message.content.some(block => block.type === 'text' && block.text === '收到,我马上按理由修正。'),
+    ).length >= 2)
+    expect(extractor.ctx.tasks.list({})).toHaveLength(1)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await shutdown(extractor.fibers)
   })
 
   it('backs off a failing route without covering ground, then flows when the route works', { timeout: 12_000 }, async () => {

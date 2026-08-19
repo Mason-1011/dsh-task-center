@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { applyCandidateMutation, applyMutation, applyProjectMutation, fold } from './fold.ts'
+import { appendReceipt, registerReceiptTypes } from './receipts.ts'
 import { MemoryTaskStore } from './store.ts'
 import type { TaskStore } from './store.ts'
 import { CandidateId, ProjectId, TaskId } from './types.ts'
@@ -37,9 +38,11 @@ import type {
   TaskView,
   WakeRule,
 } from './types.ts'
+import type { LedgerEvent } from './store.ts'
 
 export * from './types.ts'
 export { fold, applyMutation, applyProjectMutation, applyCandidateMutation, TRANSITIONS, appendPackLine, checkWakeRule, MIN_EVERY_INTERVAL_SECONDS } from './fold.ts'
+export { appendReceipt, registerReceiptTypes } from './receipts.ts'
 export { idleDays, effectiveIdle, lastSessionActivity } from './idle.ts'
 export type { HolderActivity, TaskReader } from './idle.ts'
 export { MemoryTaskStore } from './store.ts'
@@ -62,6 +65,8 @@ export interface Config {
 /** Live notification after one task-domain event commits (05 §5). */
 export interface TaskChanged {
   readonly operation: TaskOperation
+  /** The committing mutation verbatim — listeners (the rejection push) read fields the view does not carry. */
+  readonly mutation: TaskMutation
   readonly task: TaskView
 }
 
@@ -153,6 +158,7 @@ export class TaskService extends Service {
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'tasks')
+    registerReceiptTypes()
   }
 
   /**
@@ -399,7 +405,7 @@ export class TaskService extends Service {
     if (current === undefined) return { code: 'TASK_NOT_FOUND', message: 'task does not exist' }
     const view = await this.commit(taskId, { operation: 'claim' }, actor, session)
     if ('code' in view) return view
-    session.append('task/context-injected', {
+    appendReceipt(session, 'task/context-injected', {
       kind: 'task/context-injected', version: 1, taskId,
       revision: view.record.revision,
       content: view.record.contextPack,
@@ -450,6 +456,19 @@ export class TaskService extends Service {
     return parent.record.subtasks
       .map(id => this.get(id))
       .filter((view): view is TaskView => view !== undefined)
+  }
+
+  /**
+   * One task's committed ledger events, oldest first. The change history is
+   * the only place fields no view carries survive — a listener replaying a
+   * past verdict (the rejection push's boot reconciliation) reads the mutation
+   * verbatim from here.
+   * @param taskId - the task to read history for.
+   * @returns its committed events in append order; empty for an unknown id.
+   */
+  changes(taskId: TaskId): readonly LedgerEvent[] {
+    return this.store.events().filter((event): event is Extract<LedgerEvent, { taskId: TaskId }> =>
+      'taskId' in event && event.taskId === taskId)
   }
 
   /**
@@ -511,8 +530,8 @@ export class TaskService extends Service {
       operation: mutation.operation, taskId, revision: result.ok.revision, mutation, task: view,
     }
     await this.store.append({ taskId, revision: result.ok.revision, actor, at, change })
-    this.ctx.emit('task/changed', { operation: mutation.operation, task: view })
-    if (actor.kind === 'model' && session !== undefined) session.append('task/change', change)
+    this.ctx.emit('task/changed', { operation: mutation.operation, mutation, task: view })
+    if (actor.kind === 'model' && session !== undefined) appendReceipt(session, 'task/change', change)
     return view
   }
 

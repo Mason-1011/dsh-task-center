@@ -6,10 +6,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { KNOWN_SESSION_EVENT_TYPES, Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TaskService, TaskId, ProjectId } from '../src/index.ts'
 import type { ProjectHandle, TaskHandle } from '../src/index.ts'
-import type { TaskActor, TaskError, TaskView } from '../src/types.ts'
+import type { TaskActor, TaskError, TaskMutation, TaskView } from '../src/types.ts'
 
 function setup(): { ctx: Context; service: TaskService } {
   const ctx = new Context()
@@ -45,10 +45,21 @@ async function newTask(service: TaskService): Promise<TaskId> {
 }
 
 describe('TaskService lifecycle', () => {
+  it('registers its receipt event types with the persistence read path at construction', () => {
+    const { service } = setup()
+    expect(KNOWN_SESSION_EVENT_TYPES.has('task/change')).toBe(true)
+    expect(KNOWN_SESSION_EVENT_TYPES.has('task/context-injected')).toBe(true)
+    expect(service.list({})).toHaveLength(0)
+  })
+
   it('walks create → claim → progress → submit → approve', async () => {
     const { ctx, service } = setup()
     const seen: string[] = []
-    ctx.on('task/changed', ({ operation }) => seen.push(operation))
+    const mutations: TaskMutation[] = []
+    ctx.on('task/changed', ({ operation, mutation }) => {
+      seen.push(operation)
+      mutations.push(mutation)
+    })
 
     const taskId = await newTask(service)
     const session = Session.create(sessionId)
@@ -61,6 +72,25 @@ describe('TaskService lifecycle', () => {
     expect(view(await service.mutate(taskId, 4, { operation: 'approve' }, human)).record.status).toBe('done')
 
     expect(seen).toEqual(['create', 'claim', 'progress', 'submit', 'approve'])
+    // The payload carries the committing mutation verbatim — the rejection
+    // push reads the reason from it, a field no view projection holds.
+    expect(mutations[3]).toEqual({ operation: 'submit', completionNote: 'done' })
+  })
+
+  it('reads one task\'s committed history — mutations no view carries survive there', async () => {
+    const { service } = setup()
+    const taskId = await newTask(service)
+    const session = Session.create(sessionId)
+    await service.claim(taskId, session, model)
+    await service.mutate(taskId, 2, { operation: 'submit', completionNote: 'done' }, model, session)
+    await service.mutate(taskId, 3, { operation: 'reject', reason: '速度太快' }, human)
+
+    const history = service.changes(taskId)
+    expect(history.map(event => event.change.kind)).toEqual(['task/change', 'task/change', 'task/change', 'task/change'])
+    // The boot reconciliation replays the latest verdict's reason verbatim.
+    const last = history.at(-1)!
+    expect(last.change.mutation).toEqual({ operation: 'reject', reason: '速度太快' })
+    expect(service.changes(TaskId('no-such'))).toEqual([])
   })
 
   it('writes both ledger receipts for model mutations', async () => {

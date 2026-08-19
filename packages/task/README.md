@@ -10,7 +10,7 @@ Service Definition(`ctx.tasks`)。所有其他 task-center 包的依赖根。
 - `src/fold.ts`:纯状态机——`TRANSITIONS` 转换表、`applyMutation` 守卫(权限矩阵、持有者检查、有界 contextPack)、`applyCandidateMutation` 候选守卫、回放折叠(损坏流即抛错;`workedAt` 从事件流推导,patrol 与唤醒簿记不刷新它)
 - `src/store.ts`:`TaskStore` 端口(append 异步、先落盘后通知)+ 内存默认实现
 - `src/idle.ts`:闲置口径纯函数——`idleDays`(距 workedAt 的整天数)、`effectiveIdle`(子树感知 + 持有会话活跃度连接)、`lastSessionActivity`(会话日志最后活动,跳过 `session/end-seed` 账面标记)
-- `src/index.ts`:`TaskService`——CAS 变更、域事件先行、会话回执(`task/change` / `task/context-injected`)后写、活事件(`task/changed` / `project/changed` / `candidate/changed`)在提交点后派发
+- `src/index.ts`:`TaskService`——CAS 变更、域事件先行、会话回执(`task/change` / `task/context-injected`)后写、活事件(`task/changed` / `project/changed` / `candidate/changed`)在提交点后派发;`task/changed` 载荷携带提交变更原文 `mutation`——理由等字段不在视图投影里,监听方(打回回流)直接读原文;`changes(taskId)` 读一条任务的账本历史——回放旧裁决(打回回流的开机对账)从变更原文里取理由
 
 ## 闲置口径(idle.ts)
 
