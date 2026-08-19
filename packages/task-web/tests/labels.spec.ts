@@ -13,6 +13,7 @@ describe('blockedLabel', () => {
   it('maps the two known codes to Chinese categories and shows unknown codes verbatim', () => {
     expect(blockedLabel('quota')).toBe('额度')
     expect(blockedLabel('human-blocked')).toBe('人工')
+    expect(blockedLabel('blocked')).toBe('模型')
     expect(blockedLabel('waiting-on-ci')).toBe('waiting-on-ci')
   })
 })
