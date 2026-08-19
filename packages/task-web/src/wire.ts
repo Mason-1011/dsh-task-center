@@ -40,6 +40,8 @@ export interface TaskCard {
   readonly historySessions?: readonly string[]
   /** Owning project id; omitted for the unassigned bucket. */
   readonly projectId?: string
+  /** Birth workspace directory (the creating session's cwd); omitted when the birth had none. */
+  readonly workspacePath?: string
   /** Blocking reason code; omitted unless status is blocked. */
   readonly blockedCode?: string
   /** Blocking reason message; omitted unless status is blocked. */

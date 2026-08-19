@@ -16,7 +16,8 @@ export interface TaskToolTask {
   readonly status: 'todo' | 'active' | 'blocked' | 'review' | 'done'
   readonly objective: string
   readonly acceptance: string
-  readonly workspaceIds: string[]
+  /** Birth workspace directory (the creating session's cwd); null when the birth had none. */
+  readonly workspacePath: string | null
   readonly projectId: string | null
   readonly holder: string | null
   /** Sessions that carried this task before, oldest first (origin session leads). */
@@ -121,7 +122,7 @@ export function taskToolTask(view: TaskView): TaskToolTask {
     status: record.status,
     objective: record.objective,
     acceptance: record.acceptance,
-    workspaceIds: [...record.workspaceIds],
+    workspacePath: record.workspacePath === undefined ? null : record.workspacePath,
     holder: record.holder === undefined ? null : record.holder,
     historySessionIds: [...historySessionIds(record)],
     ...record.blockedReason === undefined ? {} : {
@@ -148,7 +149,7 @@ export const TASK_SCHEMA = {
     status: { type: 'string', required: true, enum: ['todo', 'active', 'blocked', 'review', 'done'] },
     objective: { type: 'string', required: true },
     acceptance: { type: 'string', required: true },
-    workspaceIds: { type: 'array', required: true, items: { type: 'string' } },
+    workspacePath: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
     projectId: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
     holder: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
     historySessionIds: { type: 'array', required: true, items: { type: 'string' } },

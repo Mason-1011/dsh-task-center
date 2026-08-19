@@ -108,7 +108,7 @@ export type TaskOrigin =
  * for the human verdict without ever being worked in the ledger.
  */
 export type TaskMutation =
-  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspaceIds?: readonly string[]; readonly origin?: TaskOrigin; readonly completionNote?: string }
+  | { readonly operation: 'create'; readonly taskId: TaskId; readonly objective: string; readonly acceptance: string; readonly projectId?: ProjectId; readonly workspacePath?: string; readonly origin?: TaskOrigin; readonly completionNote?: string }
   | { readonly operation: 'edit'; readonly objective?: string; readonly acceptance?: string; readonly projectId?: ProjectId | null }
   | { readonly operation: 'claim' }
   | { readonly operation: 'progress'; readonly note: string; readonly next?: string }
@@ -134,7 +134,8 @@ export interface TaskRecord {
   readonly blockedReason?: TaskReason
   /** The live claiming session; absent while unclaimed, done, or abandoned. */
   readonly holder?: SessionId
-  readonly workspaceIds: readonly string[]
+  /** Birth workspace: the creating session's directory, stamped once at create and never rewritten. */
+  readonly workspacePath?: string
   /** The project this task belongs to; absent while unassigned. */
   readonly projectId?: ProjectId
   readonly sessionIds: readonly SessionId[]

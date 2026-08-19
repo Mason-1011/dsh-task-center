@@ -9,7 +9,7 @@
 
 | 起始 | 操作 | 终态 | 守卫条件 | 失败错误码 |
 |---|---|---|---|---|
-| — | `create` | todo | objective、acceptance 非空;workspaceIds 可引用不存在的工作区(P1 再校验) | `TASK_INVALID_OBJECTIVE` / `TASK_INVALID_ACCEPTANCE` |
+| — | `create` | todo | objective、acceptance 非空;可选 `workspacePath` 出生盖戳(建任务会话的目录,一次写定) | `TASK_INVALID_OBJECTIVE` / `TASK_INVALID_ACCEPTANCE` |
 | todo | `claim` | active | 任务未被活会话持有;调用会话挂入 `sessionIds` 尾部 | `TASK_NOT_FOUND` / `TASK_ALREADY_CLAIMED` |
 | active | `progress` | active | note 非空;contextPack 重算不超上限 | `TASK_NOT_CLAIMED` / `TASK_INVALID_NOTE` |
 | active | `block` | blocked | 携带 `{code, message}` 理由 | `TASK_INVALID_REASON` |
@@ -124,7 +124,7 @@ type TaskDomainEvent = {
 |---|---|
 | `create(input): Promise<TaskHandle>` | 建任务;handle 含 disposer(未 claim 前可撤) |
 | `get(taskId): Promise<TaskView \| undefined>` | 单个读 |
-| `list(filter): Promise<TaskView[]>` | 按 status / workspaceId / projectId / archived 过滤 |
+| `list(filter): Promise<TaskView[]>` | 按 status / workspacePath(出生目录精确匹配) / projectId / archived 过滤 |
 | `claim(taskId, session): Promise<TaskView>` | 持有者登记 |
 | `mutate(taskId, expectedRevision, change): Promise<TaskView>` | 所有转换的单一入口(比较置换) |
 | `wakeRules(): AsyncIterable<WakeDue>` | task-wake 消费:当前到点的唤醒规则 |
@@ -155,11 +155,11 @@ type TaskDomainEvent = {
 
 | 工具 | 输入 | 成功值 | 错误并集 |
 |---|---|---|---|
-| `task_create` | objective, acceptance, workspaceIds?, parentTaskId?, projectId? | TaskView(含 subtasks id 列表) | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask / stale_revision |
+| `task_create` | objective, acceptance, parentTaskId?, projectId? | TaskView(含 subtasks id 列表;`workspacePath` 由会话头盖戳,非模型参数) | invalid_objective / invalid_acceptance / not_claimed / not_found / invalid_subtask / stale_revision |
 | `task_claim` | taskId | TaskView + contextPack(投影含 `historySessionIds` 执行史;同时产生 `task/context-injected` 会话事件) | not_found / already_claimed |
 | `task_update` | taskId, revision, note, next? | TaskView | not_claimed / stale_revision / invalid_note |
 | `task_report` | taskId, revision, outcome: `'blocked' \| 'review'`, reason?, completionNote? | TaskView | invalid_transition / invalid_reason / invalid_note |
-| `task_query` | filter(status?, workspaceId?, projectId?, parentTaskId?, limit?) | TaskView[] | invalid_filter / not_found |
+| `task_query` | filter(status?, workspacePath?, projectId?, parentTaskId?, limit?) | TaskView[] | invalid_filter / not_found |
 | `task_projects` | —(无参数) | ProjectView[](创建序,含已归档标记) | —(读路径无失败分支) |
 
 `parentTaskId` 语义:先建子任务、再以调用会话挂接到父;挂接被拒(非父持有者、父不存在、成环)即**回收刚建的任务**(abandon,同一 model actor)并返回拒绝码——工具保持单一效果。`projectId` 同理但更简单:seam 在 append 前校验项目存在且未归档,被拒的挂入**连任务都不建**(无需回收)。`task_query` 带 parentTaskId 时改走 `children()` 聚合读取(滤归档),模型据此看委派子任务的实时状态;带 projectId 时按项目收窄任一列表。

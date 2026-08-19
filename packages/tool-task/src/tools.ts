@@ -116,11 +116,6 @@ export function registerTaskTools(ctx: Context): () => void {
           required: true,
           description: 'Verifiable criteria a submitted result is checked against.',
         },
-        workspace_ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional workspaces this task spans.',
-        },
         parent_task_id: {
           type: 'string',
           description: 'Optional exact id of the parent task to link this task under.',
@@ -134,12 +129,14 @@ export function registerTaskTools(ctx: Context): () => void {
       async execute(args, exec) {
         const who = caller(exec)
         if ('code' in who) return who
+        // The birth workspace is a fact of this session's directory, not a
+        // model choice — stamped from the session header, never an argument.
         // The seam validates the project reference before appending, so a
         // refused assignment (missing or archived) never creates the task.
         const created = await ctx.tasks.create({
           objective: args.objective,
           acceptance: args.acceptance,
-          ...args.workspace_ids === undefined ? {} : { workspaceIds: args.workspace_ids },
+          ...who.session.header.cwd === undefined ? {} : { workspacePath: who.session.header.cwd },
           ...args.project_id === undefined ? {} : { projectId: projectIdOf(args.project_id) },
         }, actor(who.session))
         if ('code' in created) return toolError(created)
@@ -293,7 +290,7 @@ export function registerTaskTools(ctx: Context): () => void {
           enum: ['todo', 'active', 'blocked', 'review', 'done'],
           description: 'Optional exact status filter.',
         },
-        workspace_id: { type: 'string', description: 'Optional workspace filter.' },
+        workspace_path: { type: 'string', description: 'Optional exact birth-workspace directory filter.' },
         project_id: { type: 'string', description: 'Optional exact project id from task_projects.' },
         parent_task_id: { type: 'string', description: 'Optional exact id; list this task\'s live children.' },
         limit: { type: 'number', description: 'Optional positive safe-integer result cap.' },
@@ -315,7 +312,7 @@ export function registerTaskTools(ctx: Context): () => void {
         }
         return ctx.tasks.list({
           ...args.status === undefined ? {} : { status: args.status as TaskStatus },
-          ...args.workspace_id === undefined ? {} : { workspaceId: args.workspace_id },
+          ...args.workspace_path === undefined ? {} : { workspacePath: args.workspace_path },
           ...args.project_id === undefined ? {} : { projectId: projectIdOf(args.project_id) },
           ...args.limit === undefined ? {} : { limit: args.limit },
         }).map(taskToolTask)

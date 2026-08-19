@@ -1,5 +1,6 @@
 /**
- * Detail modal for one card: full objective/acceptance, project, holder,
+ * Detail modal for one card: full objective/acceptance, project, birth
+ * workspace, holder,
  * historical sessions, blocking reason, child rows with status dots, and the
  * context-pack tail over the official CodeBlock. Every session id — holder
  * and history alike — is a chip that jumps the conversation view to it.
@@ -68,6 +69,12 @@ export function DetailPopover(props: { connection: ConnectionService; openSessio
               <div className="task-web-field">
                 <span className="task-web-field-label">项目</span>
                 <span className="task-web-lines">{result.projectName}</span>
+              </div>
+            )}
+            {result.task.workspacePath !== undefined && (
+              <div className="task-web-field">
+                <span className="task-web-field-label">工作区(出生目录)</span>
+                <span className="task-web-lines">{result.task.workspacePath}</span>
               </div>
             )}
             <div className="task-web-field">

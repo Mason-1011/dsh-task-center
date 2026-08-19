@@ -168,9 +168,9 @@ describe('TaskService lifecycle', () => {
 
   it('filters lists and hides archived tasks by default', async () => {
     const { service } = setup()
-    await service.create({ objective: 'a', acceptance: 'x', workspaceIds: ['w1'] }, human)
-    await service.create({ objective: 'b', acceptance: 'x', workspaceIds: ['w2'] }, human)
-    expect(service.list({ workspaceId: 'w1' })).toHaveLength(1)
+    await service.create({ objective: 'a', acceptance: 'x', workspacePath: '/repo/one' }, human)
+    await service.create({ objective: 'b', acceptance: 'x', workspacePath: '/repo/two' }, human)
+    expect(service.list({ workspacePath: '/repo/one' })).toHaveLength(1)
 
     const first = service.list({})[0]!
     expect(view(await service.mutate(first.record.id, first.record.revision, { operation: 'abandon' }, human)).archived).toBe(true)
@@ -297,6 +297,12 @@ describe('acceptance births', () => {
     })
     expect(born.record.holder).toBeUndefined()
     expect(born.record.contextPack).toContain('SUBMITTED: 目标已在来源会话标记完成')
+    // The birth workspace stamps only when the extractor knows the origin cwd.
+    expect(born.record.workspacePath).toBeUndefined()
+    const stamped = view(await service.acceptanceCreate({
+      objective: '另一件', completionNote: 'n', sessionId: originSession, goalId: 'g-9', workspacePath: '/repo/x',
+    }, source))
+    expect(stamped.record.workspacePath).toBe('/repo/x')
 
     // Same origin never births twice; a different goal under the same session still may.
     expect(await service.acceptanceCreate({

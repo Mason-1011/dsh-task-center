@@ -18,11 +18,11 @@ Service Definition(`ctx.tasks`)。所有其他 task-center 包的依赖根。
 
 ## 候选(第三族实体)
 
-候选与任务、项目共用一条域事件流(设计稿 05 §1.3):`create` 仅 source actor、`promote`/`ignore` 仅人类、`supersede` 仅 source;同源(sessionId+tier+key)任一状态去重;晋升先建任务(origin 记候选与源会话)后落晋升,崩溃重放被已存在的任务挡住。候选动词全部 pending-only,终态 `promoted` / `ignored` / `superseded`。
+候选与任务、项目共用一条域事件流(设计稿 05 §1.3):`create` 仅 source actor、`promote`/`ignore` 仅人类、`supersede` 仅 source;同源(sessionId+tier+key)任一状态去重;晋升先建任务(origin 记候选与源会话)后落晋升,崩溃重放被已存在的任务挡住。候选动词全部 pending-only,终态 `promoted` / `ignored` / `superseded`。晋升时接缝把候选来源会话的目录盖成任务的 `workspacePath`(活的读会话头、死的读持久层 header,都没有则不盖)。
 
 ## 验收出生(直接进待验收)
 
-`acceptanceCreate`(仅 source actor,`create` 携带 `completionNote` 的唯一合法通道):把来源会话里「模型宣告完成、其后无人回应」的 goal 生为**直接处于 review 的任务**——无持有者、acceptance 留空(验收标准由人裁决时补写不迟)、contextPack 首行 `SUBMITTED: <完成说明>`。origin 记 `{sessionId, goalId}`(候选三元组之外的 TaskOrigin 另一臂),同源任一状态(含归档)不重复出生(`TASK_DUPLICATE_ORIGIN`)。人的裁决沿用现有动词:approve → done;reject → 回**可认领的 todo**(无持有者的出生无处退回 active——unheld active 无人能认领;有持有者的普通提交退回持有者重做不变)。无撤销句柄:工作真实已完成,不自动弃置。
+`acceptanceCreate`(仅 source actor,`create` 携带 `completionNote` 的唯一合法通道):把来源会话里「模型宣告完成、其后无人回应」的 goal 生为**直接处于 review 的任务**——无持有者、acceptance 留空(验收标准由人裁决时补写不迟)、contextPack 首行 `SUBMITTED: <完成说明>`。origin 记 `{sessionId, goalId}`(候选三元组之外的 TaskOrigin 另一臂),同源任一状态(含归档)不重复出生(`TASK_DUPLICATE_ORIGIN`)。输入可带 `workspacePath` 把来源会话的目录盖成出生戳。人的裁决沿用现有动词:approve → done;reject → 回**可认领的 todo**(无持有者的出生无处退回 active——unheld active 无人能认领;有持有者的普通提交退回持有者重做不变)。无撤销句柄:工作真实已完成,不自动弃置。
 
 ## Config
 
@@ -35,5 +35,5 @@ Service Definition(`ctx.tasks`)。所有其他 task-center 包的依赖根。
 
 - `blockedOverdue` 恒为 `false`:阻塞超时派生随 task-wake(P1 阻塞告警)落地。
 - `wakeRules()` 的 `every` 规则把每次调用视为到点;锚点数学随 task-wake 实现。
-- `workspaceIds` 可引用不存在的工作区;P1 再校验。
+- `workspacePath` 是自含的出生盖戳字符串,不引用工作区注册表,无悬挂引用可校验。
 - 候选去重键是同会话三元组;goal id 跨会话不复用,跨会话同主题各产一条(设计稿 06 §10.2)。

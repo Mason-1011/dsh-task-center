@@ -17,7 +17,7 @@ import LlmRuntime, { CallId, createUserMessage, LlmAdapter, MessageId, QUOTA_EXC
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalBlockReason, GoalChangeMeta, GoalClearChangeMeta, GoalOperation, GoalPhase, GoalSnapshotChangeMeta } from '@deepseek-ai/dsh-goal'
-import { Session, SessionId, SessionStore } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, SessionId, SessionStore } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -634,13 +634,17 @@ describe('task-source plugin', () => {
     const session = Session.create(SessionId('s-gone-done'), renumber([
       userMessage('把贪吃蛇做完', 1_000),
       ...seed([[goal('create', 'g-1', 1, 'complete', '贪吃蛇做好了'), 2_000]]),
-    ]))
+    ]), {
+      version: SESSION_FORMAT_VERSION, id: SessionId('s-gone-done'), createdAt: 1_000, cwd: '/repo/snake',
+    })
     const detach = ctx.sessions.enter(session)
     ctx.sessions.announce(session)
     detach()
     await until(() => ctx.tasks.list({}).some(task => task.record.status === 'review'))
     const born = ctx.tasks.list({}).find(task => task.record.status === 'review')!
     expect(born.record.origin).toEqual({ sessionId: SessionId('s-gone-done'), goalId: 'g-1' })
+    // The origin session's directory stamps the birth workspace.
+    expect(born.record.workspacePath).toBe('/repo/snake')
   })
 })
 

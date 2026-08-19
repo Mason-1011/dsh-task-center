@@ -177,7 +177,7 @@ export function applyMutation(record: TaskRecord | undefined, mutation: TaskMuta
       // An acceptance birth starts submitted: the completion is the extractor's
       // claim, the human verdict is the only transition left.
       status: mutation.completionNote !== undefined ? 'review' : 'todo',
-      workspaceIds: [...mutation.workspaceIds ?? []],
+      ...mutation.workspacePath === undefined ? {} : { workspacePath: mutation.workspacePath },
       ...mutation.projectId === undefined ? {} : { projectId: mutation.projectId },
       sessionIds: [],
       contextPack: mutation.completionNote === undefined ? ''

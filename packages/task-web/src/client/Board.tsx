@@ -2,7 +2,9 @@
  * The two board surfaces: the sidebar footer entry button (official checklist
  * glyph, icon-only in the collapsed rail, ⚠ dot once any open task crosses
  * the stale threshold) and the full-screen kanban overlay — five fixed
- * columns, project filter pills, the stale banner, the creation form, and
+ * columns, filter pills (human projects, then non-empty birth-workspace
+ * groups; an explicit project wins over a stamp), the stale banner, the
+ * creation form, and
  * per-card detail. Chrome comes from the official primitives (Button/Pill/
  * StateDot/Toast + icons); state lives in the store, these are projections.
  * @module @task-center/task-web/client/Board
@@ -68,13 +70,44 @@ export function BoardButton(props: { connection: ConnectionService; wide?: boole
   )
 }
 
-/** Project filter: 'all' | 'none' (无项目) | one project id. */
-type Filter = 'all' | 'none' | string
+/** Board filter: everything, the ungrouped bucket, one project, or one birth workspace. */
+type Filter =
+  | { readonly kind: 'all' }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'project'; readonly id: string }
+  | { readonly kind: 'workspace'; readonly path: string }
+
+/** One derived workspace pill group: tasks stamped with this birth directory and no explicit project. */
+interface WorkspaceGroup {
+  readonly path: string
+  readonly count: number
+}
+
+/**
+ * Derive the workspace pill groups: explicit projects win, so a stamped task
+ * under a project counts only there; only non-empty groups appear.
+ */
+function workspaceGroups(tasks: readonly TaskCard[]): WorkspaceGroup[] {
+  const counts = new Map<string, number>()
+  for (const card of tasks) {
+    if (card.projectId !== undefined || card.workspacePath === undefined) continue
+    counts.set(card.workspacePath, (counts.get(card.workspacePath) ?? 0) + 1)
+  }
+  return [...counts.entries()].map(([path, count]) => ({ path, count }))
+}
+
+/** A group's pill label: the directory's last segment, or the full path when basenames collide. */
+function workspaceLabel(path: string, all: readonly WorkspaceGroup[]): string {
+  const base = path.split('/').filter(Boolean).at(-1) ?? path
+  const collision = all.some(group => group !== undefined && group.path !== path
+    && (group.path.split('/').filter(Boolean).at(-1) ?? group.path) === base)
+  return collision ? path : base
+}
 
 /** The full-screen board overlay; renders nothing while closed. */
 export function BoardOverlay(props: { connection: ConnectionService; openSession: (id: string) => void }) {
   const state = useBoard()
-  const [filter, setFilter] = useState<Filter>('all')
+  const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [detailId, setDetailId] = useState<string | undefined>()
   const [creating, setCreating] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -92,12 +125,14 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
 
   if (!state.open) return null
   const payload = state.payload
+  const workspaces = workspaceGroups(payload?.tasks ?? [])
   const visible: readonly TaskCard[] = payload === undefined
     ? []
     : payload.tasks.filter(card => {
-      if (filter === 'all') return true
-      if (filter === 'none') return card.projectId === undefined
-      return card.projectId === filter
+      if (filter.kind === 'all') return true
+      if (filter.kind === 'none') return card.projectId === undefined && card.workspacePath === undefined
+      if (filter.kind === 'project') return card.projectId === filter.id
+      return card.projectId === undefined && card.workspacePath === filter.path
     })
 
   return (
@@ -106,18 +141,29 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
         <div className="task-web-head">
           <span className="task-web-title">任务看板</span>
           <div className="task-web-chips">
-            <Pill active={filter === 'all'} onClick={() => setFilter('all')}>全部</Pill>
+            <Pill active={filter.kind === 'all'} onClick={() => setFilter({ kind: 'all' })}>全部</Pill>
             {payload?.projects.map(project => (
               <Pill
                 key={project.id}
-                active={filter === project.id}
-                onClick={() => setFilter(project.id)}
+                active={filter.kind === 'project' && filter.id === project.id}
+                onClick={() => setFilter({ kind: 'project', id: project.id })}
               >
                 {project.name}{project.archived ? ' · 已归档' : ''}
                 <span className="task-web-chip-count">{project.taskCount}</span>
               </Pill>
             ))}
-            <Pill active={filter === 'none'} onClick={() => setFilter('none')}>无项目</Pill>
+            {workspaces.map(group => (
+              <Pill
+                key={group.path}
+                title={group.path}
+                active={filter.kind === 'workspace' && filter.path === group.path}
+                onClick={() => setFilter({ kind: 'workspace', path: group.path })}
+              >
+                {workspaceLabel(group.path, workspaces)}
+                <span className="task-web-chip-count">{group.count}</span>
+              </Pill>
+            ))}
+            <Pill active={filter.kind === 'none'} onClick={() => setFilter({ kind: 'none' })}>无分组</Pill>
           </div>
           <span className="task-web-spacer" />
           {state.fetchedAt !== undefined && (

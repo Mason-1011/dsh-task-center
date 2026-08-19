@@ -342,12 +342,15 @@ export function foldUnverifiedCompletions(events: readonly SessionEvent[]): read
  * Birth one session's unverified completions as review tasks (the shelving
  * gates call this — never the immediate pass): the objective is the goal's
  * own, the completion note names the submission's nature, and same-origin
- * dedup at the seam keeps a re-trigger from birthing twice.
+ * dedup at the seam keeps a re-trigger from birthing twice. The origin
+ * session's directory stamps the birth workspace, so the born task groups
+ * under its codebase on the board.
  * @param ctx - Context carrying `tasks`.
  * @param sessionId - the session whose goals completed unaccepted.
  * @param completions - the session's folded unverified completions.
+ * @param cwd - the origin session's working directory, when known.
  */
-async function birthAcceptances(ctx: Context, sessionId: SessionId, completions: readonly UnverifiedCompletion[]): Promise<void> {
+async function birthAcceptances(ctx: Context, sessionId: SessionId, completions: readonly UnverifiedCompletion[], cwd?: string): Promise<void> {
   if (completions.length === 0) return
   const logger = ctx.logger('task-source')
   for (const completion of completions) {
@@ -356,6 +359,7 @@ async function birthAcceptances(ctx: Context, sessionId: SessionId, completions:
       completionNote: '目标已在来源会话标记完成,其后无人回应;由抽取层提交,请人工验收',
       sessionId,
       goalId: completion.goalId,
+      ...cwd === undefined ? {} : { workspacePath: cwd },
     }, { kind: 'source' })
     if ('code' in created) {
       logger.warn('acceptance birth rejected', { sessionId, goalId: completion.goalId, code: created.code })
@@ -1134,7 +1138,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
    */
   type PendingEntry =
     | { readonly kind: 'summary'; readonly request: SummaryRequest; readonly readyAt: number }
-    | { readonly kind: 'acceptance'; readonly sessionId: SessionId; readonly lastSeq: number; readonly completions: readonly UnverifiedCompletion[]; readonly readyAt: number }
+    | { readonly kind: 'acceptance'; readonly sessionId: SessionId; readonly lastSeq: number; readonly completions: readonly UnverifiedCompletion[]; readonly readyAt: number; readonly cwd?: string }
   const queue: PendingEntry[] = []
   /** The session one queued entry speaks for, whatever its kind. */
   const entrySession = (entry: PendingEntry): SessionId =>
@@ -1337,7 +1341,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const result = await extractSession(ctx, fromSession(session), config.transcriptEvents)
       // Disposal is decisive for acceptance too: the session is closed, so a
       // completion without a reply is unverified forever — birth it now.
-      await birthAcceptances(ctx, session.id, result.unverified)
+      await birthAcceptances(ctx, session.id, result.unverified, session.header.cwd)
       if (result.summary === undefined) {
         persistMark(session.id, covered)
         return
@@ -1368,7 +1372,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       if (entry.kind === 'acceptance') {
         try {
-          await birthAcceptances(ctx, entry.sessionId, entry.completions)
+          await birthAcceptances(ctx, entry.sessionId, entry.completions, entry.cwd)
           persistMark(entry.sessionId, entry.lastSeq)
         } catch (error) {
           logger.warn('acceptance birth threw; re-queued', { sessionId: entry.sessionId, error })
@@ -1403,7 +1407,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // Idle acceptance births ride before the summary budget: they are
       // model-free, and the session was silent a full idle window — the human
       // had their chance to reply to the completion.
-      await birthAcceptances(ctx, session.id, result.unverified)
+      await birthAcceptances(ctx, session.id, result.unverified, session.header.cwd)
       if (result.summary === undefined) {
         mark.extractedThrough = covered
         persistMark(session.id, covered)
@@ -1466,9 +1470,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       // Already-paid ground: the summary never re-runs; only the acceptance
       // tier has anything new to say, and the mark stays where it was.
       if (covered) {
-        if (lastEventTime + idleMs <= Date.now()) await birthAcceptances(ctx, header.id, result.unverified)
+        if (lastEventTime + idleMs <= Date.now()) await birthAcceptances(ctx, header.id, result.unverified, header.cwd)
         else if (result.unverified.length > 0) {
-          queue.push({ kind: 'acceptance', sessionId: header.id, lastSeq, completions: result.unverified, readyAt: lastEventTime + idleMs })
+          queue.push({ kind: 'acceptance', sessionId: header.id, lastSeq, completions: result.unverified, readyAt: lastEventTime + idleMs, ...header.cwd === undefined ? {} : { cwd: header.cwd } })
         }
         continue
       }
@@ -1479,10 +1483,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         // session — the shelved log is frozen, so re-reading could only
         // re-fold the same completions the dedup would reject.
         if (lastEventTime + idleMs <= Date.now()) {
-          await birthAcceptances(ctx, header.id, result.unverified)
+          await birthAcceptances(ctx, header.id, result.unverified, header.cwd)
           persistMark(header.id, lastSeq)
         } else if (result.unverified.length > 0) {
-          queue.push({ kind: 'acceptance', sessionId: header.id, lastSeq, completions: result.unverified, readyAt: lastEventTime + idleMs })
+          queue.push({ kind: 'acceptance', sessionId: header.id, lastSeq, completions: result.unverified, readyAt: lastEventTime + idleMs, ...header.cwd === undefined ? {} : { cwd: header.cwd } })
         } else {
           persistMark(header.id, lastSeq)
         }

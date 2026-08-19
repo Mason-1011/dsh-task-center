@@ -127,7 +127,8 @@ export interface TaskHandle {
 /** Filter for `list`. */
 export interface TaskListFilter {
   readonly status?: TaskStatus
-  readonly workspaceId?: string
+  /** Exact birth-workspace directory match. */
+  readonly workspacePath?: string
   readonly projectId?: ProjectId
   readonly includeArchived?: boolean
   readonly limit?: number
@@ -188,7 +189,7 @@ export class TaskService extends Service {
     for (const record of tasks.values()) {
       if (archivedTasks.has(record.id) && filter.includeArchived !== true) continue
       if (filter.status !== undefined && record.status !== filter.status) continue
-      if (filter.workspaceId !== undefined && !record.workspaceIds.includes(filter.workspaceId)) continue
+      if (filter.workspacePath !== undefined && record.workspacePath !== filter.workspacePath) continue
       if (filter.projectId !== undefined && record.projectId !== filter.projectId) continue
       views.push({ record, blockedOverdue: false, archived: archivedTasks.has(record.id) })
       if (views.length >= limit) break
@@ -217,7 +218,7 @@ export class TaskService extends Service {
    * withdrawal handle: the work is real and already done, so nothing here
    * auto-abandons it.
    */
-  async acceptanceCreate(input: { objective: string; completionNote: string; sessionId: SessionId; goalId: string }, actor: TaskActor): Promise<TaskView | TaskError> {
+  async acceptanceCreate(input: { objective: string; completionNote: string; sessionId: SessionId; goalId: string; workspacePath?: string }, actor: TaskActor): Promise<TaskView | TaskError> {
     if (actor.kind !== 'source') return { code: 'TASK_FORBIDDEN', message: 'acceptance births are the source extractor\'s alone' }
     const origin: TaskOrigin = { sessionId: input.sessionId, goalId: input.goalId }
     const existing = this.list({ includeArchived: true, limit: Number.MAX_SAFE_INTEGER })
@@ -232,6 +233,7 @@ export class TaskService extends Service {
     return this.commit(taskId, {
       operation: 'create', taskId,
       objective: input.objective, acceptance: '',
+      ...input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath },
       origin, completionNote: input.completionNote,
     }, actor)
   }
@@ -240,13 +242,13 @@ export class TaskService extends Service {
    * Create one task. The handle's disposer abandons the task (legal only
    * before the first claim, which withdrawal enforces by error).
    */
-  async create(input: { objective: string; acceptance: string; projectId?: ProjectId; workspaceIds?: readonly string[]; origin?: TaskOrigin }, actor: TaskActor): Promise<TaskHandle | TaskError> {
+  async create(input: { objective: string; acceptance: string; projectId?: ProjectId; workspacePath?: string; origin?: TaskOrigin }, actor: TaskActor): Promise<TaskHandle | TaskError> {
     const taskId = TaskId(randomUUID())
     const view = await this.commit(taskId, {
       operation: 'create', taskId,
       objective: input.objective, acceptance: input.acceptance,
       ...input.projectId === undefined ? {} : { projectId: input.projectId },
-      ...input.workspaceIds === undefined ? {} : { workspaceIds: input.workspaceIds },
+      ...input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath },
       ...input.origin === undefined ? {} : { origin: input.origin },
     }, actor)
     if ('code' in view) return view
@@ -326,7 +328,7 @@ export class TaskService extends Service {
    * task id. Task-first ordering keeps the crash window recoverable — a task
    * with this origin blocks re-promotion instead of duplicating.
    */
-  async candidatePromote(candidateId: CandidateId, expectedRevision: number, input: { acceptance: string; objective?: string; projectId?: ProjectId }, actor: TaskActor): Promise<{ task: TaskView; candidate: CandidateView } | TaskError> {
+  async candidatePromote(candidateId: CandidateId, expectedRevision: number, input: { acceptance: string; objective?: string; projectId?: ProjectId; workspacePath?: string }, actor: TaskActor): Promise<{ task: TaskView; candidate: CandidateView } | TaskError> {
     const candidates = this.candidates()
     const current = candidates.find(view => view.record.id === candidateId)
     if (current === undefined) return { code: 'CANDIDATE_NOT_FOUND', message: 'candidate does not exist' }
@@ -349,6 +351,7 @@ export class TaskService extends Service {
       operation: 'create', taskId,
       objective, acceptance: input.acceptance,
       ...input.projectId === undefined ? {} : { projectId: input.projectId },
+      ...input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath },
       origin,
     }, actor)
     if ('code' in task) return task

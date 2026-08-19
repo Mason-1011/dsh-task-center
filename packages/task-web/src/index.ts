@@ -9,6 +9,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: carries the `sessionPersistence` service augmentation into the
+// build program; the promote stamp reads it optionally through `ctx.get`.
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { CandidateId, ProjectId, TaskId, effectiveIdle, historySessionIds, lastSessionActivity } from '@task-center/task'
 import type { HolderActivity, TaskMutation, TaskView } from '@task-center/task'
@@ -67,6 +70,27 @@ export class TaskBoardService extends TypertRemoteService {
     return session === undefined ? undefined : lastSessionActivity(session.events)
   }
 
+  /**
+   * Resolve a candidate's origin session directory for the birth-workspace
+   * stamp: the live session's header first, then the persisted header index.
+   * Promoted candidates are idle by gate, so the persisted read is the common
+   * path; an unresolvable origin (no persistence backend mounted, header
+   * gone) simply leaves the task unstamped.
+   * @param candidateId - the candidate being promoted.
+   * @returns the origin session's cwd, or undefined.
+   */
+  private async originWorkspace(candidateId: CandidateId): Promise<string | undefined> {
+    const candidate = this.ctx.tasks.candidates().find(view => view.record.id === candidateId)
+    if (candidate === undefined) return undefined
+    const sessionId = candidate.record.origin.sessionId
+    const live = this.ctx.sessions.get(sessionId)
+    if (live !== undefined) return live.header.cwd
+    const persistence: SessionPersistence | undefined = this.ctx.get('sessionPersistence')
+    if (persistence === undefined) return undefined
+    const header = (await persistence.list()).find(entry => entry.id === sessionId)
+    return header?.cwd
+  }
+
   /** One task view as one wire card; optional facts are omitted, not nulled. */
   private card(view: TaskView, now: Date): TaskCard {
     const record = view.record
@@ -83,6 +107,7 @@ export class TaskBoardService extends TypertRemoteService {
       ...record.holder === undefined ? {} : { holder: record.holder },
       ...history.length === 0 ? {} : { historySessions: history },
       ...record.projectId === undefined ? {} : { projectId: record.projectId },
+      ...record.workspacePath === undefined ? {} : { workspacePath: record.workspacePath },
       ...record.blockedReason === undefined
         ? {}
         : { blockedCode: record.blockedReason.code, blockedMessage: record.blockedReason.message },
@@ -232,9 +257,11 @@ export class TaskBoardService extends TypertRemoteService {
       return { ok: false, code: 'CANDIDATE_INVALID_ACCEPTANCE', message: '验收标准不能为空 —— 候选抽不出验收,这一段由人补' }
     }
     const trimmedObjective = (objective ?? '').trim()
+    const workspacePath = await this.originWorkspace(CandidateId(candidateId))
     const promoted = await this.ctx.tasks.candidatePromote(CandidateId(candidateId), expectedRevision, {
       acceptance: trimmedAcceptance,
       ...trimmedObjective === '' ? {} : { objective: trimmedObjective },
+      ...workspacePath === undefined ? {} : { workspacePath },
     }, { kind: 'human' })
     if ('code' in promoted) return { ok: false, code: promoted.code, message: promoted.message }
     return { ok: true, taskId: promoted.task.record.id }

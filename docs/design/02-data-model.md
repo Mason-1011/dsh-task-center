@@ -24,7 +24,7 @@ defineDomain({
 | `acceptance` | **验收标准**——agent 自判"完成"的依据,与普通 todo 的本质区别 |
 | `status` | 状态机:`todo / active / blocked / review / done` |
 | `blockedReason` | 阻塞原因(结构化 code + message,仿 goal) |
-| `workspaceIds` | 关联工作区(跨项目在此发生) |
+| `workspacePath` | 出生工作区(建任务会话的目录,创建时盖戳一次、永不改写;自含路径字符串,不引用工作区注册表;看板分组时显式项目优先于盖戳) |
 | `sessionIds` | 挂接的会话(有序执行史,`claim` 追加);历史对话 = `origin.sessionId` 置首 + sessionIds 的去重列表,纯派生 `historySessionIds(record)` |
 | `contextPack` | 上下文包(见 §4) |
 | `wakeRule` | 可选唤醒规则(after / at / every) |

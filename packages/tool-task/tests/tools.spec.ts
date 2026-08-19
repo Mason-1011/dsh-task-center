@@ -75,6 +75,9 @@ describe('tool-task', () => {
     const created = await ok(ctx, 'task_create', { objective: 'ship the ledger', acceptance: 'restart restores' })
     expect(created.status).toBe('todo')
     expect(created.holder).toBe(null)
+    // The birth workspace is stamped from the session, not chosen: this test
+    // session carries no cwd, so it projects null.
+    expect(created.workspacePath).toBe(null)
 
     const listed = await tool(ctx, 'task_query').execute({ status: 'todo' }, execOf()) as TaskToolListValue
     if ('code' in listed) throw new Error(listed.code)
