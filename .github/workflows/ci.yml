@@ -19,6 +19,10 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      # Workspace imports resolve through each package's dist/, so the tree
+      # must be built before tsc can see cross-package types.
+      - name: Build
+        run: pnpm run build
       - name: Typecheck
         run: pnpm run typecheck
       - name: Test (keyless; e2e self-skips without a key)
