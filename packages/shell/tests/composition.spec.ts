@@ -44,7 +44,7 @@ async function backdateLedger(root: string, days: number): Promise<void> {
 /** Dispatch one slash line and return its result text, failing loud on errors. */
 async function dispatch(ctx: Context, agent: Agent, line: string): Promise<string> {
   const signal = new AbortController().signal
-  const execution = await ctx.commands.execute(agent, line, signal)
+  const execution = await ctx.commands.execute(agent, line, [], signal)
   if (execution === undefined) throw new Error(`${line} did not resolve to a command`)
   if (execution.result.kind === 'error') throw new Error(`${line} failed: ${execution.result.text}`)
   return execution.result.text ?? ''

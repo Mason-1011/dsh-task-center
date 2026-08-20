@@ -94,7 +94,7 @@ suite('real-model task loop', () => {
     expect(task.record.contextPack).toContain('SUBMITTED')
 
     // The human actor closes the loop: the command never reaches the model.
-    const approved = await ctx.commands.execute(agent, `/task approve ${task.record.id.slice(0, 8)}`, AbortSignal.timeout(10_000))
+    const approved = await ctx.commands.execute(agent, `/task approve ${task.record.id.slice(0, 8)}`, [], AbortSignal.timeout(10_000))
     expect(approved?.result.kind).toBe('success')
     task = ctx.tasks.list({})[0]!
     expect(task.record.status).toBe('done')

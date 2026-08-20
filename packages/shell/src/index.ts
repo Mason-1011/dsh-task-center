@@ -92,7 +92,7 @@ export async function runRepl(ctx: Context, agent: Agent, io: ReplIo): Promise<v
       }
       if (line === '/exit' || line === '/quit') break
       if (line.startsWith('/')) {
-        const execution = await ctx.commands.execute(agent, line, signal)
+        const execution = await ctx.commands.execute(agent, line, [], signal)
         if (execution === undefined) {
           io.write(`未知命令:${line}。/task 查看任务面板,/exit 退出。`)
         } else if (execution.result.kind === 'error') {

@@ -50,7 +50,7 @@ const signal = new AbortController().signal
 
 /** Dispatch one typed line; commands never reach the model. */
 async function dispatch(ctx: Context, agent: Agent, line: string): Promise<CommandExecution> {
-  const execution = await ctx.commands.execute(agent, line, signal)
+  const execution = await ctx.commands.execute(agent, line, [], signal)
   if (execution === undefined) throw new Error(`${line} did not resolve to the task command`)
   return execution
 }
