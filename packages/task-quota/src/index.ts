@@ -4,9 +4,11 @@
  * quota exhaustion (`QUOTA`), the guard parks every task the failing session
  * holds BEFORE the loop sees the failure: block with a structured quota
  * reason (the pack line names the wall and the reset time), release the hold
- * (active/blocked → todo, so a fresh session may claim), and set a one-shot
- * wake rule at the reset instant. task-wake then fires at reset and the
- * continuation reads the pack — the closed loop: 额度用尽 → 挂起释放 → 到点续做.
+ * (active/blocked → todo, so a fresh session may claim), and — unless
+ * `resumeOnReset: false` — set a one-shot wake rule at the reset instant.
+ * task-wake then fires at reset and the continuation reads the pack — the
+ * closed loop: 额度用尽 → 挂起释放 → 到点续做;with the knob off the loop ends at
+ * 挂起释放 and a human resumes.
  * @module @task-center/task-quota
  */
 
@@ -35,6 +37,13 @@ export interface Config {
    * provider delay, tasks park without a wake rule and a human decides.
    */
   readonly fallbackWindowSeconds?: number
+  /**
+   * Whether a parked task carries the one-shot wake rule at the expected reset
+   * instant, so task-wake resumes it automatically. Default true; `false`
+   * parks and releases only — the pack line then says a human decides — for
+   * deployments that want quota walls to stay quiet until someone moves.
+   */
+  readonly resumeOnReset?: boolean
 }
 
 /** Terminal error finish facts of one stream, or undefined. */
@@ -49,6 +58,10 @@ function terminalFailure(chunk: StreamChunk): LlmFailure | undefined {
  */
 export function apply(ctx: Context, config: Config): void {
   const logger = ctx.logger('task-quota')
+  if (config.resumeOnReset !== undefined && typeof config.resumeOnReset !== 'boolean') {
+    throw new Error(`task-quota: resumeOnReset must be a boolean when set, got ${String(config.resumeOnReset)}`)
+  }
+  const resumeOnReset = config.resumeOnReset !== false
 
   /** Park every task the dying session holds: block → release → wake. */
   const park = async (sessionId: SessionId, decision: ParkDecision): Promise<void> => {
@@ -59,12 +72,12 @@ export function apply(ctx: Context, config: Config): void {
       try {
         const blocked = await ctx.tasks.mutate(view.record.id, view.record.revision, {
           operation: 'block',
-          reason: { code: 'quota', message: parkLine(decision) },
+          reason: { code: 'quota', message: parkLine(decision, resumeOnReset) },
         }, actor)
         if ('code' in blocked) throw new Error(blocked.code)
         const released = await ctx.tasks.mutate(view.record.id, blocked.record.revision, { operation: 'release' }, actor)
         if ('code' in released) throw new Error(released.code)
-        if (decision.kind === 'park') {
+        if (decision.kind === 'park' && resumeOnReset) {
           const woken = await ctx.tasks.mutate(view.record.id, released.record.revision, {
             operation: 'wake-set',
             rule: { kind: 'at', scheduledAt: decision.resetAt },

@@ -28,7 +28,7 @@ It is implemented independently of the harness repo and depends only on its publ
 - **Projects and workspaces** — human-managed projects plus a workspace directory stamped at task birth; the board filters four ways (all / project / workspace / ungrouped).
 - **Scheduled work** — a task can carry wake rules (one-shot / at-time / recurring); when the time comes, a fresh session is spawned, claims the task, and continues. A daily patrol session refreshes the state of every open task. Wake rules and their next fire time render on cards and in the detail dialog.
 - **Scheduled sends** — from the session page or the board detail, schedule a message (default `cont`) to be delivered into an existing session at a set time, with quick presets — a task parked mid-flight picks itself up.
-- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they wake and resume. Blocked cards label the reason category (quota / human / …).
+- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they wake and resume (set task-quota `resumeOnReset: false` to park only and wait for a human). Blocked cards label the reason category (quota / human / …).
 - **Crash recovery** — when a session holding a task dies (crash or kill), the hold is released automatically and the task becomes claimable again.
 - **Automatic extraction** — goals, approved plans, and todo tables left in idle sessions birth task candidates for you to confirm and promote; a goal completed with no human response goes straight to awaiting-review; a rejection pushes the reason back into the original conversation and re-claims it for rework.
 - **Two frontends** — a full-screen web kanban (five columns, filters, blocked pinned on top, detail dialog, creation) and a `/task` command panel, both reading the same ledger.
@@ -212,6 +212,7 @@ Append to the web profile's `cordis.patch.yml` after the command-task row:
 | `staleDays` | command-task / task-web | 3 | Stale-warning threshold in days |
 | `patrol.at` | task-wake | — | Daily patrol time (e.g. `'09:30'`; a missed slot is skipped) |
 | `agent` | task-source / task-wake / task-sched | — | Route (provider + model) for wake / summary / scheduled-send sessions |
+| `resumeOnReset` | task-quota | true | Whether the reset-point wake rule is set automatically; false parks and releases only, a human resumes |
 
 ## Development
 

@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SchedSend } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
+import { ClockOutline14 } from './icons.tsx'
 import { schedStore, useSched } from './store.ts'
 import { localWhen, nextMorning9, toLocalInput } from './time.ts'
 
@@ -141,8 +142,8 @@ export function SchedHeaderAction(props: { connection: ConnectionService; sessio
   const pending = (state.sends ?? []).filter(send => send.sessionId === props.sessionId && send.status === 'pending').length
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(current => !current)}>
-        ⏰ 定时{pending > 0 ? ` ·${pending}` : ''}
+      <Button size="sm" variant="ghost" icon={<ClockOutline14 size={12} />} onClick={() => setOpen(current => !current)}>
+        定时{pending > 0 ? ` ·${pending}` : ''}
       </Button>
       {open && <SchedModal connection={props.connection} sessionId={props.sessionId} onClose={() => setOpen(false)} />}
     </>

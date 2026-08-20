@@ -10,6 +10,12 @@
  */
 
 const CSS = `
+
+/* The shell sets no global box-sizing (its primitives declare their own), so
+   width+padding composites here must say it themselves — without this every
+   card renders 22px wider than its column and each column grows a horizontal
+   scrollbar. Attribute selectors cover every element carrying our classes. */
+[class^='task-web-'], [class*=' task-web-'] { box-sizing: border-box; }
 /* ── sidebar footer entry (icon-only in the collapsed rail, full row when wide) ── */
 .task-web-entry {
   position: relative;
@@ -141,6 +147,8 @@ const CSS = `
 /* warn colors stay on icons per the shell's own usage; marker text is a
    label token so it clears contrast in both themes */
 .task-web-mark { color: var(--dsw-alias-label-secondary); }
+/* the wake marker pairs the clock glyph with its text on one baseline */
+.task-web-wake { display: inline-flex; align-items: center; gap: 3px; }
 .task-web-objective { line-height: 1.5; word-break: break-word; }
 .task-web-blocked { font-size: 12px; color: var(--dsw-alias-state-error-primary); }
 .task-web-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }

@@ -51,8 +51,16 @@ export function decide(failure: LlmFailure, fallbackWindowSeconds: number | unde
 /** A park decision the guard will execute (everything but `ignore`). */
 export type ParkDecision = Exclude<QuotaDecision, { kind: 'ignore' }>
 
-/** Human-readable pack line for one park, so the next session resumes from the wall it hit. */
-export function parkLine(decision: ParkDecision): string {
+/**
+ * Human-readable pack line for one park, so the next session resumes from the
+ * wall it hit.
+ * @param decision - the executed park decision.
+ * @param resumeOnReset - whether the guard set the reset-instant wake rule
+ *   (the plugin's `resumeOnReset` knob; the line must say who continues).
+ * @returns the pack line naming the wall, the expected reset, and the mover.
+ */
+export function parkLine(decision: ParkDecision, resumeOnReset = true): string {
   if (decision.kind === 'park-without-wake') return '额度用尽,平台未给出恢复时间;任务已释放,等人工设唤醒或换 key'
-  return `额度用尽(预计 ${decision.resetAt} 恢复${decision.from === 'fallback' ? ',按声明窗口推算' : ''});任务已释放,到点自动唤醒续做`
+  const wall = `额度用尽(预计 ${decision.resetAt} 恢复${decision.from === 'fallback' ? ',按声明窗口推算' : ''});任务已释放`
+  return resumeOnReset ? `${wall},到点自动唤醒续做` : `${wall},自动续做已关闭,等人工唤醒`
 }

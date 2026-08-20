@@ -6,10 +6,12 @@
  * @module @task-center/task-web/client/TaskCard
  */
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Button, Input, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BoardAction, TaskCard as Card } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
+import { ClockOutline14 } from './icons.tsx'
 import { boardStore } from './store.ts'
 import { STATUS_DOT, STATUS_LABEL, blockedLabel } from './status.ts'
 import { localWhen } from './time.ts'
@@ -46,11 +48,16 @@ export function TaskCardView(props: { connection: ConnectionService; card: Card;
   }
 
   const open = !card.archived && card.status !== 'done'
-  const markers: string[] = []
+  const markers: ReactNode[] = []
   if (open && card.idleDays >= 1) markers.push(`闲置 ${card.idleDays} 天`)
   if (card.subtaskCount > 0) markers.push(`子任务 ×${card.subtaskCount}`)
   if (card.wake !== undefined) {
-    markers.push(`⏰ ${card.wake.nextAt === undefined ? card.wake.label : localWhen(card.wake.nextAt)}`)
+    markers.push(
+      <span key="wake" className="task-web-wake">
+        <ClockOutline14 size={12} />
+        {card.wake.nextAt === undefined ? card.wake.label : localWhen(card.wake.nextAt)}
+      </span>,
+    )
   }
   const dot = STATUS_DOT[card.status]
 
@@ -70,7 +77,9 @@ export function TaskCardView(props: { connection: ConnectionService; card: Card;
       </span>
       <span className="task-web-objective" style={{ display: 'block' }}>{card.objective}</span>
       {markers.length > 0 && (
-        <span className="task-web-mark" style={{ display: 'block' }}>{markers.join(' · ')}</span>
+        <span className="task-web-mark" style={{ display: 'block' }}>
+          {markers.map((marker, index) => <Fragment key={index}>{index > 0 && ' · '}{marker}</Fragment>)}
+        </span>
       )}
       {card.status === 'blocked' && card.blockedCode !== undefined && (
         <span className="task-web-blocked" style={{ display: 'block' }}>

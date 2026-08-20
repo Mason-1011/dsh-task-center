@@ -8,6 +8,7 @@
 import { useEffect } from 'react'
 import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ConnectionService } from './context.ts'
+import { ClockOutline14 } from './icons.tsx'
 import { schedStore, useSched } from './store.ts'
 import { localWhen } from './time.ts'
 
@@ -20,7 +21,10 @@ export function SchedDock(props: { connection: ConnectionService; sessionId?: st
   if (pending.length === 0) return null
   return (
     <div className="task-sched-dock">
-      <span className="task-sched-dock-label">⏰ 定时发送</span>
+      <span className="task-sched-dock-label">
+        <ClockOutline14 size={12} />
+        定时发送
+      </span>
       {pending.map(send => (
         <span key={send.id} className="task-sched-dock-chip">
           <span className="task-sched-row-content">{send.content}</span>

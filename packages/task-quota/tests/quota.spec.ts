@@ -19,7 +19,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
 import * as TaskQuota from '../src/index.ts'
-import { decide } from '../src/index.ts'
+import { decide, parkLine } from '../src/index.ts'
 import * as TaskWake from '@task-center/task-wake'
 import * as ToolTask from '@task-center/tool-task'
 
@@ -50,6 +50,13 @@ describe('quota decision', () => {
     for (const code of ['RATE_LIMIT', 'AUTH', 'INVALID_CREDENTIAL', 'CONTEXT_WINDOW_EXCEEDED']) {
       expect(decide(failure({ code, providerRetryAfterMs: 5_000 }), 18_000, now)).toEqual({ kind: 'ignore' })
     }
+  })
+
+  it('names the mover in the pack line per the resume knob', () => {
+    const park = { kind: 'park', resetAt: '2026-08-17T13:00:00.000Z', from: 'provider' } as const
+    expect(parkLine(park)).toContain('到点自动唤醒续做')
+    expect(parkLine(park, false)).toContain('自动续做已关闭')
+    expect(parkLine(park, false)).not.toContain('到点自动唤醒续做')
   })
 })
 
@@ -82,7 +89,7 @@ class FakeQuotaAdapter extends LlmAdapter {
 }
 
 /** Boot the spine, the fake provider, the seam, the quota guard, and task-wake. */
-async function boot(): Promise<Context> {
+async function boot(quotaConfig: TaskQuota.Config = { fallbackWindowSeconds: 18_000 }): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
@@ -93,7 +100,7 @@ async function boot(): Promise<Context> {
   ctx.llm.registerAdapter(['fake-quota'], new FakeQuotaAdapter(1_000))
   await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
   await ctx.plugin(ToolTask)
-  await ctx.plugin(TaskQuota, { fallbackWindowSeconds: 18_000 })
+  await ctx.plugin(TaskQuota, quotaConfig)
   await ctx.plugin(TaskWake, { pollSeconds: 0.2, agent: { provider: 'fake-quota', model: 'm' } })
   return ctx
 }
@@ -166,5 +173,39 @@ describe('task-quota guard', () => {
     expect(parked.record.holder).toBeUndefined()
     expect(parked.record.wakeRule).toBeUndefined()
     expect(parked.record.contextPack).toContain('未给出恢复时间')
+  })
+
+  it('parks without the wake rule when resumeOnReset is off', { timeout: 10_000 }, async () => {
+    const ctx = await boot({ fallbackWindowSeconds: 18_000, resumeOnReset: false })
+
+    const created = await ctx.tasks.create({ objective: 'o', acceptance: 'a' }, { kind: 'human' })
+    if ('code' in created) throw new Error(created.code)
+    const worker = ctx.agentLoop.create(SessionId('worker-3'), { provider: 'fake-quota', model: 'm' })
+    const claimed = await ctx.tasks.claim(created.task.record.id, worker.session, { kind: 'model', sessionId: worker.session.id })
+    if ('code' in claimed) throw new Error(claimed.code)
+
+    const idle = worker.whenIdle()
+    worker.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await idle.catch(() => undefined)
+
+    // Parked and released with the wall named, but the reset rule never set.
+    const parked = ctx.tasks.get(created.task.record.id)!
+    expect(parked.record.status).toBe('todo')
+    expect(parked.record.holder).toBeUndefined()
+    expect(parked.record.wakeRule).toBeUndefined()
+    expect(parked.record.contextPack).toContain('自动续做已关闭')
+    expect(parked.record.contextPack).toContain('预计')
+
+    // Long enough for a wrongly-set rule to have fired (wake polls every 0.2s).
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(ctx.tasks.get(created.task.record.id)?.record.wakeRule).toBeUndefined()
+    expect(ctx.agents.list().some(agent => agent.session.id.startsWith('wake-'))).toBe(false)
+  })
+
+  it('rejects a non-boolean resumeOnReset at mount', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
+    await expect(ctx.plugin(TaskQuota, { resumeOnReset: 'yes' as never })).rejects.toThrow('resumeOnReset')
   })
 })

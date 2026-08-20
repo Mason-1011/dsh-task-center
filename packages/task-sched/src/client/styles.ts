@@ -8,6 +8,10 @@
  */
 
 const CSS = `
+
+/* Same as task-web: the shell has no global box-sizing, and width+padding
+   composites here (dock, chips, modal rows) must not overflow their row. */
+[class^='task-sched-'], [class*=' task-sched-'] { box-sizing: border-box; }
 /* ── form fields inside the modal ── */
 .task-sched-body { display: flex; flex-direction: column; gap: 12px; }
 .task-sched-field { display: flex; flex-direction: column; gap: 4px; }
@@ -53,6 +57,8 @@ const CSS = `
   font: var(--dsw-font-xxs-12); color: var(--dsw-alias-label-secondary);
 }
 .task-sched-dock-label { color: var(--dsw-alias-label-tertiary); }
+/* dock label and the header button pair the clock glyph with their text */
+.task-sched-dock-label { display: inline-flex; align-items: center; gap: 3px; }
 .task-sched-dock-chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px;
   color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-1);
