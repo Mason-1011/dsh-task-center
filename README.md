@@ -28,7 +28,7 @@ It is implemented independently of the harness repo and depends only on its publ
 - **Projects and workspaces** — human-managed projects plus a workspace directory stamped at task birth; the board filters four ways (all / project / workspace / ungrouped).
 - **Scheduled work** — a task can carry wake rules (one-shot / at-time / recurring); when the time comes, a fresh session is spawned, claims the task, and continues. A daily patrol session refreshes the state of every open task. Wake rules and their next fire time render on cards and in the detail dialog.
 - **Scheduled sends** — from the session page or the board detail, schedule a message (default `cont`) to be delivered into an existing session at a set time, with quick presets — a task parked mid-flight picks itself up.
-- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they wake and resume (set task-quota `resumeOnReset: false` to park only and wait for a human). Blocked cards label the reason category (quota / human / …).
+- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they wake and resume. The kanban head toggle (自动续做 开/关) flips this at runtime and the flip survives restarts; `resumeOnReset` in config is only the default. Blocked cards label the reason category (quota / human / …).
 - **Crash recovery** — when a session holding a task dies (crash or kill), the hold is released automatically and the task becomes claimable again.
 - **Automatic extraction** — goals, approved plans, and todo tables left in idle sessions birth task candidates for you to confirm and promote; a goal completed with no human response goes straight to awaiting-review; a rejection pushes the reason back into the original conversation and re-claims it for rework.
 - **Two frontends** — a full-screen web kanban (five columns, filters, blocked pinned on top, detail dialog, creation) and a `/task` command panel, both reading the same ledger.
@@ -181,7 +181,7 @@ Acceptance verdicts (approve / reject), release, archive, block, project CRUD, c
 
 ### Web board (task-web)
 
-Open the full-screen five-column board (todo / in-progress / blocked / awaiting-review / done) from the sidebar footer, with the pending-candidates inbox. Filters: all / project / workspace (birth directory) / ungrouped. The detail dialog shows acceptance criteria, past conversations (clickable through to the session page), subtasks, the context-pack tail, wake rules, and scheduled sends. Blocked cards and details label the reason category (quota / human / …). A ⚠ banner names the open task left untouched longest within `staleDays` (idle computed over the subtree, freshest wins; delegation in progress does not count as idle).
+Open the full-screen five-column board (todo / in-progress / blocked / awaiting-review / done) from the sidebar footer, with the pending-candidates inbox. The head row carries the quota auto-resume toggle (自动续做 开/关, task-quota's runtime knob). Filters: all / project / workspace (birth directory) / ungrouped. The detail dialog shows acceptance criteria, past conversations (clickable through to the session page), subtasks, the context-pack tail, wake rules, and scheduled sends. Blocked cards and details label the reason category (quota / human / …). A ⚠ banner names the open task left untouched longest within `staleDays` (idle computed over the subtree, freshest wins; delegation in progress does not count as idle).
 
 Append to the web profile's `cordis.patch.yml` after the command-task row:
 
@@ -212,7 +212,7 @@ Append to the web profile's `cordis.patch.yml` after the command-task row:
 | `staleDays` | command-task / task-web | 3 | Stale-warning threshold in days |
 | `patrol.at` | task-wake | — | Daily patrol time (e.g. `'09:30'`; a missed slot is skipped) |
 | `agent` | task-source / task-wake / task-sched | — | Route (provider + model) for wake / summary / scheduled-send sessions |
-| `resumeOnReset` | task-quota | true | Whether the reset-point wake rule is set automatically; false parks and releases only, a human resumes |
+| `resumeOnReset` | task-quota | true | Default for the auto-resume knob; the board head toggle flips it at runtime (persisted in task-quota's own storage domain) |
 
 ## Development
 
@@ -233,7 +233,7 @@ corepack pnpm start                  # or --root <dir> for a custom working root
 
 - **Changed plugin source**: after `corepack pnpm run build`, `remove` then `add` the same packages into the profile — pnpm caches `file:` copies and `--force` does not refresh them.
 - **Changed web client code**: the client bundle's verdict and version are cached per process; after a build you must **restart** `dsh web`. `dist/client.js` must exist before the composition row (a declared client package missing its bundle fails the whole web start), so always build before add. The headless profile does not install task-web (no client consumer).
-- **Rows inserted by patch must carry an explicit `config`** (`{}` when empty): the patch path does not normalize a missing config, and a plugin reading config directly in apply (e.g. task-quota) crashes on the spot.
+- **Rows inserted by patch must carry an explicit `config`** (`{}` when empty): the patch path does not normalize a missing config, and a plugin reading config without a default in apply crashes on the spot.
 - **Ledger location**: dsh profiles share `~/.dsh/storages`; the standalone REPL shell defaults to `~/.dsh-task-center`. The two never meet.
 - **task-sched goes only in the web profile**: one send table should have exactly one polling process at a time (two runners would each deliver the same row). headless and the standalone shell omit it; profiles without it can still schedule sends through the web UI.
 

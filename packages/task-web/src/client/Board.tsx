@@ -22,9 +22,12 @@ import {
   StateDot,
   Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { QuotaGetResult, QuotaSetResult } from '@task-center/task-quota'
 import type { TaskCard, TaskStatus } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
+import { callApi } from './api.ts'
 import { CandidateCardView } from './CandidateCard.tsx'
+import { ClockOutline14 } from './icons.tsx'
 import { CreateForm } from './CreateForm.tsx'
 import { DetailPopover } from './DetailPopover.tsx'
 import { STATUS_DOT, STATUS_LABEL } from './status.ts'
@@ -110,7 +113,17 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [detailId, setDetailId] = useState<string | undefined>()
   const [creating, setCreating] = useState(false)
+  const [quotaResume, setQuotaResume] = useState<boolean | undefined>()
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // The resume knob rides its own namespace (task-quota owns the policy);
+  // undefined (absent plugin, failed fetch) keeps the toggle hidden.
+  useEffect(() => {
+    if (!state.open) return
+    void callApi<QuotaGetResult>(props.connection, 'quotaGet', {}, 'task-quota').then(result => {
+      if (result.ok) setQuotaResume(result.resume)
+    })
+  }, [state.open, props.connection])
 
   // Esc closes the board only when no modal is up — the primitives' Modal has
   // its own document listener, and one keypress must not close both layers.
@@ -178,6 +191,23 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
           >
             刷新
           </Button>
+          {quotaResume !== undefined && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ClockOutline14 size={12} />}
+              title="额度重置后是否自动唤醒被挂起的任务续做;点击切换,对下一次额度墙生效"
+              onClick={() => {
+                void (async () => {
+                  const result = await callApi<QuotaSetResult>(props.connection, 'quotaSet', { value: !quotaResume }, 'task-quota')
+                  if (result.ok) setQuotaResume(result.resume)
+                  else boardStore.notify(`自动续做切换失败:${result.code}`)
+                })()
+              }}
+            >
+              自动续做 {quotaResume ? '开' : '关'}
+            </Button>
+          )}
           <Button variant="primary" size="sm" icon={<IconPlusOutline16 />} onClick={() => setCreating(true)}>
             新建任务
           </Button>

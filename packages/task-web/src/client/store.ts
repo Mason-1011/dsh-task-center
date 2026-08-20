@@ -148,6 +148,8 @@ export const boardStore = {
   },
   /** Dismiss the ephemeral notice (the Toast's onDone). */
   clearNotice: (): void => { setState({ notice: undefined }) },
+  /** Surface one ephemeral message on the board's Toast (action failures). */
+  notify: (message: string): void => { setState({ notice: message, noticeSeq: state.noticeSeq + 1 }) },
 }
 
 /** React binding over the store. */

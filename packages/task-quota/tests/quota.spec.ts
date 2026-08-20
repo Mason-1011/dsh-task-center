@@ -8,6 +8,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -15,10 +18,14 @@ import LlmRuntime, { createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmFailure, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
+import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
-import * as TaskQuota from '../src/index.ts'
+import { TaskQuotaService } from '../src/index.ts'
+import type { Config } from '../src/index.ts'
 import { decide, parkLine } from '../src/index.ts'
 import * as TaskWake from '@task-center/task-wake'
 import * as ToolTask from '@task-center/tool-task'
@@ -89,7 +96,7 @@ class FakeQuotaAdapter extends LlmAdapter {
 }
 
 /** Boot the spine, the fake provider, the seam, the quota guard, and task-wake. */
-async function boot(quotaConfig: TaskQuota.Config = { fallbackWindowSeconds: 18_000 }): Promise<Context> {
+async function boot(quotaConfig: Config = { fallbackWindowSeconds: 18_000 }): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
@@ -100,7 +107,7 @@ async function boot(quotaConfig: TaskQuota.Config = { fallbackWindowSeconds: 18_
   ctx.llm.registerAdapter(['fake-quota'], new FakeQuotaAdapter(1_000))
   await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
   await ctx.plugin(ToolTask)
-  await ctx.plugin(TaskQuota, quotaConfig)
+  await ctx.plugin(TaskQuotaService, quotaConfig)
   await ctx.plugin(TaskWake, { pollSeconds: 0.2, agent: { provider: 'fake-quota', model: 'm' } })
   return ctx
 }
@@ -156,7 +163,7 @@ describe('task-quota guard', () => {
     await ctx.plugin(AgentLoop, { agents: [] })
     ctx.llm.registerAdapter(['fake-blank'], new FakeQuotaAdapter())
     await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
-    await ctx.plugin(TaskQuota, {})
+    await ctx.plugin(TaskQuotaService, {})
 
     const created = await ctx.tasks.create({ objective: 'o', acceptance: 'a' }, { kind: 'human' })
     if ('code' in created) throw new Error(created.code)
@@ -206,6 +213,68 @@ describe('task-quota guard', () => {
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
-    await expect(ctx.plugin(TaskQuota, { resumeOnReset: 'yes' as never })).rejects.toThrow('resumeOnReset')
+    await expect(ctx.plugin(TaskQuotaService, { resumeOnReset: 'yes' as never })).rejects.toThrow('resumeOnReset')
+  })
+
+  it('parks without the wake rule when the knob is flipped off at runtime', { timeout: 10_000 }, async () => {
+    // Config default stays on; only the runtime flip (the web toggle's path) turns it off.
+    const ctx = await boot()
+    expect(ctx['task-quota'].quotaGet()).toEqual({ ok: true, resume: true })
+    expect(await ctx['task-quota'].quotaSet(false)).toEqual({ ok: true, resume: false })
+
+    const created = await ctx.tasks.create({ objective: 'o', acceptance: 'a' }, { kind: 'human' })
+    if ('code' in created) throw new Error(created.code)
+    const worker = ctx.agentLoop.create(SessionId('worker-4'), { provider: 'fake-quota', model: 'm' })
+    const claimed = await ctx.tasks.claim(created.task.record.id, worker.session, { kind: 'model', sessionId: worker.session.id })
+    if ('code' in claimed) throw new Error(claimed.code)
+
+    const idle = worker.whenIdle()
+    worker.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await idle.catch(() => undefined)
+
+    // The runtime flip governed the park: no wake rule, the wall named in the pack.
+    const parked = ctx.tasks.get(created.task.record.id)!
+    expect(parked.record.wakeRule).toBeUndefined()
+    expect(parked.record.contextPack).toContain('自动续做已关闭')
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(ctx.agents.list().some(agent => agent.session.id.startsWith('wake-'))).toBe(false)
+
+    // Flipping back on re-arms the closed loop for the next wall.
+    expect(await ctx['task-quota'].quotaSet(true)).toEqual({ ok: true, resume: true })
+  })
+
+  it('rejects a non-boolean knob value at the wire', async () => {
+    const ctx = await boot()
+    expect(await ctx['task-quota'].quotaSet('yes' as never)).toEqual({
+      ok: false, code: 'QUOTA_INVALID_VALUE', message: 'value 必须是布尔值',
+    })
+  })
+})
+
+describe('task-quota resume knob store', () => {
+  it('persists the last flip across a full remount of the durable medium', { timeout: 8_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'task-quota-'))
+    const bootDurable = async (): Promise<Context> => {
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(TaskService, { contextPackByteLimit: 2000, listDefaultLimit: 20 })
+      await ctx.plugin(Storage)
+      await ctx.plugin(StorageJson, { root })
+      await ctx.plugin(StorageDomain, { backend: 'json', routes: {} })
+      await ctx.plugin(TaskQuotaService, {})
+      return ctx
+    }
+    try {
+      const first = await bootDurable()
+      await until(() => first['task-quota'].quotaGet().resume === true)
+      expect(await first['task-quota'].quotaSet(false)).toEqual({ ok: true, resume: false })
+      await first.fiber.dispose()
+
+      const second = await bootDurable()
+      await until(() => second['task-quota'].quotaGet().resume === false)
+      expect(second['task-quota'].quotaGet().resume).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
