@@ -1,7 +1,7 @@
 {
   "name": "dsh-task-center",
-  "version": "0.1.0",
-  "description": "Task board for DeepSeek Harness: kanban, wake, quota-resume, scheduled sends, and the web board — the web-profile entry bundle.",
+  "version": "0.2.0",
+  "description": "The task-center plugin set for DeepSeek Harness in one package: task ledger, model tools, human commands, wake patrol, quota-resume guard, idle-session mining, the reaper, scheduled sends, and the web kanban.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -12,34 +12,82 @@
     "dsh-plugin",
     "deepseek-harness",
     "tasks",
-    "kanban"
+    "kanban",
+    "scheduler"
   ],
   "engines": {
     "node": ">=24"
   },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
+  "type": "module",
   "exports": {
+    ".": "./dist/index.js",
+    "./client": "./dist/client.js",
+    "./plugins/task": "./dist/plugins/task.js",
+    "./plugins/task-local": "./dist/plugins/task-local.js",
+    "./plugins/task-source": "./dist/plugins/task-source.js",
+    "./plugins/tool-task": "./dist/plugins/tool-task.js",
+    "./plugins/command-task": "./dist/plugins/command-task.js",
+    "./plugins/task-wake": "./dist/plugins/task-wake.js",
+    "./plugins/task-quota": "./dist/plugins/task-quota.js",
+    "./plugins/task-reaper": "./dist/plugins/task-reaper.js",
+    "./plugins/task-sched": "./dist/plugins/task-sched.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
+    "dist",
     "cordis.patch.yml",
     "README.md"
   ],
-  "dependencies": {
-    "dsh-task-center-command-task": "workspace:^",
-    "dsh-task-center-task": "workspace:^",
-    "dsh-task-center-task-local": "workspace:^",
-    "dsh-task-center-task-quota": "workspace:^",
-    "dsh-task-center-task-reaper": "workspace:^",
-    "dsh-task-center-task-sched": "workspace:^",
-    "dsh-task-center-task-source": "workspace:^",
-    "dsh-task-center-task-wake": "workspace:^",
-    "dsh-task-center-task-web": "workspace:^",
-    "dsh-task-center-tool-task": "workspace:^"
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis-plugin-group": "^1.0.1",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.6",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.2",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-loop": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-brand": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-commands": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-goal": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-launch-environment": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-deepseek": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-storage": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-storage-json": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "dsh-task-center-task": "workspace:*",
+    "dsh-task-center-task-local": "workspace:*",
+    "dsh-task-center-task-source": "workspace:*",
+    "dsh-task-center-tool-task": "workspace:*",
+    "dsh-task-center-command-task": "workspace:*",
+    "dsh-task-center-task-wake": "workspace:*",
+    "dsh-task-center-task-quota": "workspace:*",
+    "dsh-task-center-task-reaper": "workspace:*",
+    "dsh-task-center-task-sched": "workspace:*",
+    "dsh-task-center-task-web": "workspace:*",
+    "esbuild": "^0.27.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
   }
 }

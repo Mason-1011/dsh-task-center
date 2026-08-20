@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-command-task",
   "version": "0.1.0",
+  "private": true,
   "description": "Human /task command surface for the task-center seam.",
   "license": "MIT",
   "repository": {

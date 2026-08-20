@@ -71,42 +71,34 @@ packages/      dsh-task-center-* 插件包(pnpm workspace)
 
 要求 dsh ≥ 0.1.0-rc.8。前置:已全局安装 [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh)(`npm i -g @deepseek-ai/dsh`),且 `dsh plugin` 能找到 `pnpm`(corepack 用户:`corepack enable`;若 node 目录无写权限,`corepack enable --install-directory <目录>` 后把该目录挂上 PATH)。
 
-从 npm 一条命令装完 —— 自带全部插件与默认配置行,不用克隆、不用构建:
+从 npm 装一个包即可 —— 全部插件打进同一个包,自带默认配置行,不用克隆、不用构建:
 
 ```sh
-dsh plugin --profile web add dsh-task-center              # web 界面 profile(dsh web)
-dsh plugin --profile tasks add dsh-task-center-headless   # 任意新建的纯命令行 profile
+dsh plugin --profile web add dsh-task-center
 ```
 
-两个入口包的分工由 storage 决定:`dsh-task-center` 叠在 `web` profile 上(它的 bundle 自带 storage 三行,共用 `~/.dsh/storages` 账本根);`dsh-task-center-headless` 自带 storage 三行,配从 `dsh-base` 初始化的新建 profile。装错了会启动大声报错(storage 重复或缺依赖),不会静默出错。每个插件行都带部署默认值;在 profile 自己的 `cordis.patch.yml` 里按 `id` 覆盖任意行(后层整段替换 `config`)。
+`web` profile(首次 `dsh web` 自动创建)自带本套件需要的 storage 三行,共用 `~/.dsh/storages` 账本根;本包不重插这三行,不存在 storage 重复装两份的问题。新建的非 web profile 需先自行补上 storage 三行([片段](packages/bundle/README.md));缺了它们启动会大声报错,不会静默出错。每个插件行都带部署默认值;在 profile 自己的 `cordis.patch.yml` 里按 `id` 覆盖任意行(后层整段替换 `config`)。
+
+0.1.0 的多包家族(`dsh-task-center-task` 等)已弃用,由 `dsh-task-center` 一个包全部取代。
 
 然后设好 `DEEPSEEK_API_KEY`(或在 web 的 Models 页保存)即可:
 
 ```sh
-dsh web                              # 浏览器 UI;侧栏底部出现任务看板入口
-dsh --profile tasks "某任务"          # 一次性:建 agent、干活、打印结果、退出
+dsh web                          # 浏览器 UI;侧栏底部出现任务看板入口
+dsh --profile web "某任务"        # 一次性:建 agent、干活、打印结果、退出
 ```
 
 <details>
 <summary>从源码安装(开发用)</summary>
 
-构建后把工作区包直接装入(`shell` 除外——它是自带 REPL 的独立启动器,与 dsh 运行模式冲突):
+构建工作区后装入唯一的 bundle 包(它把各插件包编译进自己的 `dist`):
 
 ```sh
-corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
-dsh plugin --profile headless add \
-  file:./packages/task file:./packages/task-local file:./packages/tool-task \
-  file:./packages/command-task file:./packages/task-wake \
-  file:./packages/task-quota file:./packages/task-reaper \
-  file:./packages/task-source
-dsh plugin --profile web add \
-  file:./packages/task file:./packages/task-local file:./packages/tool-task \
-  file:./packages/command-task file:./packages/task-wake \
-  file:./packages/task-quota file:./packages/task-reaper file:./packages/task-web \
-  file:./packages/task-source file:./packages/task-sched
+corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist + packages/bundle/dist
+dsh plugin --profile web add file:./packages/bundle
 ```
 
-在 `~/.dsh/profiles/<name>/cordis.patch.yml`(不是 `cordis.yml`,那是空根)注册插件行。headless 需附带 storage 三行;web bundle 自带 storage,**不要重插**(duplicate id 会大声失败)。随包默认值就在 [`packages/bundle-headless/cordis.patch.yml`](packages/bundle-headless/cordis.patch.yml) 与 [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml),照抄即可。
+插件行(及其默认值)来自 bundle 自带的层,即 [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml);新建非 web profile 还需按包 README 里的片段补 storage 三行。
 
 不启动只检查组合树:
 
@@ -120,7 +112,7 @@ dsh --profile <name> --dump-config
 
 ```sh
 export DEEPSEEK_API_KEY=...          # 或在 web 的 Models 页保存
-dsh --profile headless "某任务"       # 一次性:建 agent、干活、打印结果、退出
+dsh --profile web "某任务"           # 一次性:建 agent、干活、打印结果、退出
 dsh web                              # 浏览器 UI:任务工具进模型,/task 命令面进人类
 ```
 
@@ -143,22 +135,6 @@ dsh web                              # 浏览器 UI:任务工具进模型,/task 
 ### Web 看板(task-web)
 
 侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。头部操作行带「自动续做」弹窗(开关 + 续做会话选择,task-quota 的运行时旋钮;指定会话的下拉列出运行中与历史会话);会话页 ⏰「定时」弹窗内另有「额度感知续作」开关,把续做目标直接指到该会话。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务、上下文包尾部、定时唤醒规则与定时发送栏。阻塞卡片与详情标注阻塞原因类别(额度/人工等)。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
-
-web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
-
-```yaml
-    - id: task-web
-      name: 'dsh-task-center-task-web'
-      config:
-        staleDays: 3
-    - id: task-sched
-      name: 'dsh-task-center-task-sched'
-      config:
-        pollSeconds: 30
-        agent:
-          provider: deepseek-official
-          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
-```
 
 ## 配置
 
@@ -192,11 +168,11 @@ corepack pnpm start                  # 也可 --root <目录> 指定工作根
 
 ### 常见问题与坑
 
-- **改了插件源码**:`corepack pnpm run build` 后,对 profile 先 `remove` 再 `add` 同一批包——pnpm 缓存 `file:` 拷贝,`--force` 刷不掉;
-- **改了 web 客户端代码**:client bundle 的判定与版本按进程缓存,必须 build 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add;headless profile 不装 task-web(无 client 消费者);
+- **改了插件源码**:`corepack pnpm run build` 后,对 profile 先 `remove` 再 `add` `file:./packages/bundle`——pnpm 缓存 `file:` 拷贝,`--force` 刷不掉;
+- **改了 web 客户端代码**:client bundle 的判定与版本按进程缓存,必须 build 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add;
 - **patch 插入的行必须带显式 `config`**(空也给 `{}`):patch 路径不把缺失 config 归一化,apply 直读 config 且无默认值的插件会当场崩;
 - **账本位置**:dsh profile 共用 `~/.dsh/storages`;独立 REPL 壳默认 `~/.dsh-task-center`,两者互不相通。
-- **task-sched 只装 web profile**:同一张发送表同一时刻只应有一个进程轮询(两个运行器会对同一行各投一次),headless 与独立壳不装;不装的 profile 仍可通过 web 界面下发送。
+- **同一时刻只装进一个 profile**:定时发送的轮询按启动进程进行;两个 profile 同时装本包会共用 storage 根,对同一行各投一次。独立 REPL 壳永不安装。
 
 ## 路线图
 

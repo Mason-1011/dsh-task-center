@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-task-sched",
   "version": "0.1.0",
+  "private": true,
   "description": "Scheduled sends: deliver a user message into a session at a chosen time.",
   "license": "MIT",
   "repository": {

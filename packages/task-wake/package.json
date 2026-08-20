@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-task-wake",
   "version": "0.1.0",
+  "private": true,
   "description": "Wake-rule patrol: fires fresh sessions when tasks come due.",
   "license": "MIT",
   "repository": {

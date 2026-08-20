@@ -17,13 +17,7 @@ if (version === undefined || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
 }
 
 /** Directories whose package.json is published; root and shell stay out. */
-const PUBLISHED = [
-  'packages/bundle', 'packages/bundle-headless',
-  'packages/command-task', 'packages/task', 'packages/task-local',
-  'packages/task-quota', 'packages/task-reaper', 'packages/task-sched',
-  'packages/task-source', 'packages/task-wake', 'packages/task-web',
-  'packages/tool-task',
-]
+const PUBLISHED = ['packages/bundle']
 
 for (const dir of ['.', ...PUBLISHED]) {
   const file = join(root, dir, 'package.json')

@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-task",
   "version": "0.1.0",
+  "private": true,
   "description": "Task ledger seam for DeepSeek Harness: tasks, projects, and candidates over an append-only event stream.",
   "license": "MIT",
   "repository": {

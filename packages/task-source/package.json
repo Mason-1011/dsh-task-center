@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-task-source",
   "version": "0.1.0",
+  "private": true,
   "description": "Idle-session mining: summarizes dormant sessions into task candidates.",
   "license": "MIT",
   "repository": {

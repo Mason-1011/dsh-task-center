@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-tool-task",
   "version": "0.1.0",
+  "private": true,
   "description": "Model-facing task tools (claim, report, list) for the task-center seam.",
   "license": "MIT",
   "repository": {

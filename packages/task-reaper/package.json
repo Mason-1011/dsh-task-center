@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-task-reaper",
   "version": "0.1.0",
+  "private": true,
   "description": "Reaps abandoned tasks past their stale threshold.",
   "license": "MIT",
   "repository": {

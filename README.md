@@ -73,42 +73,34 @@ packages/      dsh-task-center-* plugin packages (pnpm workspace)
 
 Requires dsh ≥ 0.1.0-rc.8. Prerequisite: the [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh) installed globally (`npm i -g @deepseek-ai/dsh`), with `pnpm` reachable by `dsh plugin` (corepack users: `corepack enable`; if the node directory is not writable, `corepack enable --install-directory <dir>` and put that dir on PATH).
 
-One command from npm — it brings every plugin and its default rows, no clone, no build:
+One package from npm — it bundles every plugin and its default rows, no clone, no build:
 
 ```sh
-dsh plugin --profile web add dsh-task-center              # the web-UI profile (dsh web)
-dsh plugin --profile tasks add dsh-task-center-headless   # any fresh headless profile
+dsh plugin --profile web add dsh-task-center
 ```
 
-Two entry bundles because storage decides the split: `dsh-task-center` layers onto the `web` profile, whose own bundle already carries the storage rows at the shared `~/.dsh/storages` root; `dsh-task-center-headless` carries the storage rows itself, for a profile a fresh name initializes from `dsh-base`. Picking the wrong one fails loudly at boot (duplicate storage or a missing dependency), never silently. Every plugin row lands with a deployment default; override any row by `id` in the profile's own `cordis.patch.yml` (a later layer replaces the whole `config`).
+The `web` profile (created by `dsh web` on first run) already carries the storage rows this set rides, at the shared `~/.dsh/storages` root — the package never inserts them, so a duplicate storage stack cannot happen. A fresh, non-web profile adds the three storage rows itself first ([snippet](packages/bundle/README.md)); without them the boot fails loudly, never silently. Every plugin row lands with a deployment default; override any row by `id` in the profile's own `cordis.patch.yml` (a later layer replaces the whole `config`).
+
+The 0.1.0 multi-package family (`dsh-task-center-task` etc.) is deprecated; one `dsh-task-center` package replaces all of it.
 
 Then set `DEEPSEEK_API_KEY` (or save it through the web UI's Models page) and go:
 
 ```sh
-dsh web                              # browser UI; the board entry appears in the sidebar footer
-dsh --profile tasks "some task"      # one-shot: create agent, work, print, exit
+dsh web                          # browser UI; the board entry appears in the sidebar footer
+dsh --profile web "some task"    # one-shot: create agent, work, print, exit
 ```
 
 <details>
 <summary>From source (development)</summary>
 
-Build and add the workspace packages directly (all except `shell` — a standalone REPL launcher that conflicts with dsh run modes):
+Build the workspace and add the single bundle package (it compiles the plugin packages into its own `dist`):
 
 ```sh
-corepack pnpm install && corepack pnpm run build   # produces packages/*/dist
-dsh plugin --profile headless add \
-  file:./packages/task file:./packages/task-local file:./packages/tool-task \
-  file:./packages/command-task file:./packages/task-wake \
-  file:./packages/task-quota file:./packages/task-reaper \
-  file:./packages/task-source
-dsh plugin --profile web add \
-  file:./packages/task file:./packages/task-local file:./packages/tool-task \
-  file:./packages/command-task file:./packages/task-wake \
-  file:./packages/task-quota file:./packages/task-reaper file:./packages/task-web \
-  file:./packages/task-source file:./packages/task-sched
+corepack pnpm install && corepack pnpm run build   # produces packages/*/dist + packages/bundle/dist
+dsh plugin --profile web add file:./packages/bundle
 ```
 
-Register the plugin rows in `~/.dsh/profiles/<name>/cordis.patch.yml` (not `cordis.yml` — that one is an empty root). headless needs the three storage rows too; the web bundle ships storage, so **do not re-insert them** (a duplicate id fails loudly). The shipped defaults live in [`packages/bundle-headless/cordis.patch.yml`](packages/bundle-headless/cordis.patch.yml) and [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml) — copy from there.
+The plugin rows (and their defaults) come from the bundle's own layer, [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml); a fresh non-web profile needs the storage rows from the package README snippet too.
 
 Validate the composition tree without booting:
 
@@ -121,9 +113,9 @@ dsh --profile <name> --dump-config
 ## Usage
 
 ```sh
-export DEEPSEEK_API_KEY=...          # or save it on the web Models page
-dsh --profile headless "some task"   # one-shot: build an agent, work, print, exit
-dsh web                              # browser UI: task tools for the model, /task command for you
+export DEEPSEEK_API_KEY=...   # or save it on the web Models page
+dsh --profile web "some task" # one-shot: build an agent, work, print, exit
+dsh web                       # browser UI: task tools for the model, /task command for you
 ```
 
 ### Model tools (tool-task)
@@ -145,22 +137,6 @@ Acceptance verdicts (approve / reject), release, archive, block, project CRUD, c
 ### Web board (task-web)
 
 Open the full-screen five-column board (todo / in-progress / blocked / awaiting-review / done) from the sidebar footer, with the pending-candidates inbox. The head row carries the quota auto-resume dialog (自动续做: on/off plus the resume-target session picker, task-quota's runtime knobs); the session page's ⏰ scheduling dialog carries the second entry — a quota-aware resume switch that targets that session. Filters: all / project / workspace (birth directory) / ungrouped. The detail dialog shows acceptance criteria, past conversations (clickable through to the session page), subtasks, the context-pack tail, wake rules, and scheduled sends. Blocked cards and details label the reason category (quota / human / …). A ⚠ banner names the open task left untouched longest within `staleDays` (idle computed over the subtree, freshest wins; delegation in progress does not count as idle).
-
-Append to the web profile's `cordis.patch.yml` after the command-task row:
-
-```yaml
-    - id: task-web
-      name: 'dsh-task-center-task-web'
-      config:
-        staleDays: 3
-    - id: task-sched
-      name: 'dsh-task-center-task-sched'
-      config:
-        pollSeconds: 30
-        agent:
-          provider: deepseek-official
-          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
-```
 
 ## Configuration
 
@@ -194,11 +170,11 @@ corepack pnpm start                  # or --root <dir> for a custom working root
 
 ### Gotchas
 
-- **Changed plugin source**: after `corepack pnpm run build`, `remove` then `add` the same packages into the profile — pnpm caches `file:` copies and `--force` does not refresh them.
-- **Changed web client code**: the client bundle's verdict and version are cached per process; after a build you must **restart** `dsh web`. `dist/client.js` must exist before the composition row (a declared client package missing its bundle fails the whole web start), so always build before add. The headless profile does not install task-web (no client consumer).
+- **Changed plugin source**: after `corepack pnpm run build`, `remove` then `add` `file:./packages/bundle` — pnpm caches `file:` copies and `--force` does not refresh them.
+- **Changed web client code**: the client bundle's verdict and version are cached per process; after a build you must **restart** `dsh web`. `dist/client.js` must exist before the composition row (a declared client package missing its bundle fails the whole web start), so always build before add.
 - **Rows inserted by patch must carry an explicit `config`** (`{}` when empty): the patch path does not normalize a missing config, and a plugin reading config without a default in apply crashes on the spot.
 - **Ledger location**: dsh profiles share `~/.dsh/storages`; the standalone REPL shell defaults to `~/.dsh-task-center`. The two never meet.
-- **task-sched goes only in the web profile**: one send table should have exactly one polling process at a time (two runners would each deliver the same row). headless and the standalone shell omit it; profiles without it can still schedule sends through the web UI.
+- **Install into exactly one profile at a time**: the scheduled-send poller runs per boot; two profiles both carrying the package share the storage root and would each deliver the same row. The standalone REPL shell never installs it.
 
 ## Roadmap
 

@@ -1,6 +1,7 @@
 {
   "name": "dsh-task-center-task-local",
   "version": "0.1.0",
+  "private": true,
   "description": "Durable task-ledger store over the dsh storage domain.",
   "license": "MIT",
   "repository": {
