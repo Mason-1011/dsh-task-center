@@ -3,6 +3,8 @@
 **English | [简体中文](README.zh-CN.md)**
 
 [![CI](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-task-center?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/dsh-task-center)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-task-center?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/dsh-task-center)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict%20%7C%20ESM-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](./package.json)
@@ -71,15 +73,29 @@ packages/      dsh-task-center-* plugin packages (pnpm workspace)
 
 Requires dsh ≥ 0.1.0-rc.8. Prerequisite: the [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh) installed globally (`npm i -g @deepseek-ai/dsh`), with `pnpm` reachable by `dsh plugin` (corepack users: `corepack enable`; if the node directory is not writable, `corepack enable --install-directory <dir>` and put that dir on PATH).
 
-**1. Build** (Node does not type-strip `.ts` under `node_modules`, so plugins must be loaded as built JS into the profile):
+One command from npm — it brings every plugin and its default rows, no clone, no build:
+
+```sh
+dsh plugin --profile web add dsh-task-center              # the web-UI profile (dsh web)
+dsh plugin --profile tasks add dsh-task-center-headless   # any fresh headless profile
+```
+
+Two entry bundles because storage decides the split: `dsh-task-center` layers onto the `web` profile, whose own bundle already carries the storage rows at the shared `~/.dsh/storages` root; `dsh-task-center-headless` carries the storage rows itself, for a profile a fresh name initializes from `dsh-base`. Picking the wrong one fails loudly at boot (duplicate storage or a missing dependency), never silently. Every plugin row lands with a deployment default; override any row by `id` in the profile's own `cordis.patch.yml` (a later layer replaces the whole `config`).
+
+Then set `DEEPSEEK_API_KEY` (or save it through the web UI's Models page) and go:
+
+```sh
+dsh web                              # browser UI; the board entry appears in the sidebar footer
+dsh --profile tasks "some task"      # one-shot: create agent, work, print, exit
+```
+
+<details>
+<summary>From source (development)</summary>
+
+Build and add the workspace packages directly (all except `shell` — a standalone REPL launcher that conflicts with dsh run modes):
 
 ```sh
 corepack pnpm install && corepack pnpm run build   # produces packages/*/dist
-```
-
-**2. Add the packages** (from the repo root; all except `shell` — that one is a standalone REPL launcher that conflicts with dsh run modes):
-
-```sh
 dsh plugin --profile headless add \
   file:./packages/task file:./packages/task-local file:./packages/tool-task \
   file:./packages/command-task file:./packages/task-wake \
@@ -92,75 +108,15 @@ dsh plugin --profile web add \
   file:./packages/task-source file:./packages/task-sched
 ```
 
-A profile is initialized from its template on first use (`web` / `headless` ship templates; other names start from `dsh-base`).
+Register the plugin rows in `~/.dsh/profiles/<name>/cordis.patch.yml` (not `cordis.yml` — that one is an empty root). headless needs the three storage rows too; the web bundle ships storage, so **do not re-insert them** (a duplicate id fails loudly). The shipped defaults live in [`packages/bundle-headless/cordis.patch.yml`](packages/bundle-headless/cordis.patch.yml) and [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml) — copy from there.
 
-**3. Register the plugin rows** in `~/.dsh/profiles/<name>/cordis.patch.yml` (not `cordis.yml` — that one is an empty root). headless needs the three storage rows too; the web bundle ships storage, so **do not re-insert them** (a duplicate id fails loudly) — just drop the first three lines from the template below.
+Validate the composition tree without booting:
 
-<details>
-<summary>cordis.patch.yml template (headless)</summary>
-
-```yaml
-- insert:
-    - id: storage
-      name: '@deepseek-ai/dsh-storage'
-    - id: storage-json
-      name: '@deepseek-ai/dsh-storage-json'
-      config:
-        root: !!js dshHomePath('storages')   # same root as the web bundle: both profiles share one task ledger
-    - id: storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
-      config:
-        backend: json
-        routes: {}
-    - id: tasks
-      name: 'dsh-task-center-task'
-      config:
-        contextPackByteLimit: 2000
-        listDefaultLimit: 20
-    - id: task-local
-      name: 'dsh-task-center-task-local'
-      config: {}
-    - id: task-source
-      name: 'dsh-task-center-task-source'
-      config:
-        pollSeconds: 30
-        idleHours: 3
-        agent:
-          provider: deepseek-official
-          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
-        summariesPerTick: 2
-        transcriptEvents: 40
-    - id: tool-task
-      name: 'dsh-task-center-tool-task'
-      config: {}
-    - id: command-task
-      name: 'dsh-task-center-command-task'
-      config:
-        staleDays: 3
-    - id: task-wake
-      name: 'dsh-task-center-task-wake'
-      config:
-        pollSeconds: 30
-        agent:
-          provider: deepseek-official
-          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
-        patrol:
-          at: '09:30'
-    - id: task-quota
-      name: 'dsh-task-center-task-quota'
-      config: {}
-    - id: task-reaper
-      name: 'dsh-task-center-task-reaper'
-      config: {}
+```sh
+dsh --profile <name> --dump-config
 ```
 
 </details>
-
-**4. Validate the composition tree**:
-
-```sh
-dsh --profile <name> --dump-config   # no start, just checks the tree
-```
 
 ## Usage
 

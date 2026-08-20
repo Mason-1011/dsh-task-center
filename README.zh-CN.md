@@ -3,6 +3,8 @@
 **[English](README.md) | 简体中文**
 
 [![CI](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-task-center?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/dsh-task-center)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-task-center?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/dsh-task-center)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict%20%7C%20ESM-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](./package.json)
@@ -69,15 +71,29 @@ packages/      dsh-task-center-* 插件包(pnpm workspace)
 
 要求 dsh ≥ 0.1.0-rc.8。前置:已全局安装 [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh)(`npm i -g @deepseek-ai/dsh`),且 `dsh plugin` 能找到 `pnpm`(corepack 用户:`corepack enable`;若 node 目录无写权限,`corepack enable --install-directory <目录>` 后把该目录挂上 PATH)。
 
-**1. 构建**(Node 不做 `node_modules` 下的 `.ts` 类型擦除,插件必须以 JS 产物装入 profile):
+从 npm 一条命令装完 —— 自带全部插件与默认配置行,不用克隆、不用构建:
+
+```sh
+dsh plugin --profile web add dsh-task-center              # web 界面 profile(dsh web)
+dsh plugin --profile tasks add dsh-task-center-headless   # 任意新建的纯命令行 profile
+```
+
+两个入口包的分工由 storage 决定:`dsh-task-center` 叠在 `web` profile 上(它的 bundle 自带 storage 三行,共用 `~/.dsh/storages` 账本根);`dsh-task-center-headless` 自带 storage 三行,配从 `dsh-base` 初始化的新建 profile。装错了会启动大声报错(storage 重复或缺依赖),不会静默出错。每个插件行都带部署默认值;在 profile 自己的 `cordis.patch.yml` 里按 `id` 覆盖任意行(后层整段替换 `config`)。
+
+然后设好 `DEEPSEEK_API_KEY`(或在 web 的 Models 页保存)即可:
+
+```sh
+dsh web                              # 浏览器 UI;侧栏底部出现任务看板入口
+dsh --profile tasks "某任务"          # 一次性:建 agent、干活、打印结果、退出
+```
+
+<details>
+<summary>从源码安装(开发用)</summary>
+
+构建后把工作区包直接装入(`shell` 除外——它是自带 REPL 的独立启动器,与 dsh 运行模式冲突):
 
 ```sh
 corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
-```
-
-**2. 装包**(从仓库根装入;`shell` 除外——它是自带 REPL 的独立启动器,与 dsh 运行模式冲突):
-
-```sh
 dsh plugin --profile headless add \
   file:./packages/task file:./packages/task-local file:./packages/tool-task \
   file:./packages/command-task file:./packages/task-wake \
@@ -90,75 +106,15 @@ dsh plugin --profile web add \
   file:./packages/task-source file:./packages/task-sched
 ```
 
-profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板,其他名字从 `dsh-base` 起)。
+在 `~/.dsh/profiles/<name>/cordis.patch.yml`(不是 `cordis.yml`,那是空根)注册插件行。headless 需附带 storage 三行;web bundle 自带 storage,**不要重插**(duplicate id 会大声失败)。随包默认值就在 [`packages/bundle-headless/cordis.patch.yml`](packages/bundle-headless/cordis.patch.yml) 与 [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml),照抄即可。
 
-**3. 注册插件行**:写进 `~/.dsh/profiles/<name>/cordis.patch.yml`(不是 `cordis.yml`,那是空根)。headless 需附带 storage 三行;web bundle 自带 storage,**不要重插**(duplicate id 会大声失败),从下模板删掉前三行即可。
+不启动只检查组合树:
 
-<details>
-<summary>cordis.patch.yml 模板(headless)</summary>
-
-```yaml
-- insert:
-    - id: storage
-      name: '@deepseek-ai/dsh-storage'
-    - id: storage-json
-      name: '@deepseek-ai/dsh-storage-json'
-      config:
-        root: !!js dshHomePath('storages')   # 与 web bundle 同根:两个 profile 共用一份任务账本
-    - id: storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
-      config:
-        backend: json
-        routes: {}
-    - id: tasks
-      name: 'dsh-task-center-task'
-      config:
-        contextPackByteLimit: 2000
-        listDefaultLimit: 20
-    - id: task-local
-      name: 'dsh-task-center-task-local'
-      config: {}
-    - id: task-source
-      name: 'dsh-task-center-task-source'
-      config:
-        pollSeconds: 30
-        idleHours: 3
-        agent:
-          provider: deepseek-official
-          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
-        summariesPerTick: 2
-        transcriptEvents: 40
-    - id: tool-task
-      name: 'dsh-task-center-tool-task'
-      config: {}
-    - id: command-task
-      name: 'dsh-task-center-command-task'
-      config:
-        staleDays: 3
-    - id: task-wake
-      name: 'dsh-task-center-task-wake'
-      config:
-        pollSeconds: 30
-        agent:
-          provider: deepseek-official
-          model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
-        patrol:
-          at: '09:30'
-    - id: task-quota
-      name: 'dsh-task-center-task-quota'
-      config: {}
-    - id: task-reaper
-      name: 'dsh-task-center-task-reaper'
-      config: {}
+```sh
+dsh --profile <name> --dump-config
 ```
 
 </details>
-
-**4. 验证组合树**:
-
-```sh
-dsh --profile <name> --dump-config   # 不启动,只检查组合树
-```
 
 ## 使用
 
