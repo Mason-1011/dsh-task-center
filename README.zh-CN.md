@@ -5,8 +5,6 @@
 > 个人任务指挥中心:[dsh(DeepSeek Harness)](https://github.com/deepseek-ai/deepseek-harness) 的任务全生命周期插件族。
 > **人管一摊长期任务,agent 跨会话认领并推进,定时自己醒来干活,进度对人类永远可见。**
 
-![任务看板](docs/images/board.png)
-
 ## 简介
 
 dsh(以及 Claude Code / Codex 这类 agent 工具)的工作单位是**会话**——会话结束,主动性就死。本仓库解决四类断点:

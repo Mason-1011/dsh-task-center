@@ -5,8 +5,6 @@
 > A personal task command center for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — a full task-lifecycle plugin suite.
 > **You steer a long-lived backlog; agents claim tasks across sessions, wake themselves up on schedule to keep working, and progress stays visible to you at all times.**
 
-![Task board](docs/images/board.png)
-
 ## The problem it solves
 
 Agent tools such as dsh, Claude Code, and Codex work in **sessions** — when a session ends, the initiative dies. Real work breaks across four seams:
