@@ -2,12 +2,12 @@
  * Model-facing task projection: the canonical value shape of every task tool,
  * its JSON Schema, and the closed tool-error union. Wake rules are not
  * model-visible yet — no tool sets them until task-wake ships.
- * @module @task-center/tool-task/src/view
+ * @module dsh-task-center-tool-task/src/view
  */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { historySessionIds } from '@task-center/task'
-import type { ProjectView, TaskError, TaskErrorCode, TaskView } from '@task-center/task'
+import { historySessionIds } from 'dsh-task-center-task'
+import type { ProjectView, TaskError, TaskErrorCode, TaskView } from 'dsh-task-center-task'
 
 /** One task as the model sees it: identity, discipline fields, and the pack. */
 export interface TaskToolTask {

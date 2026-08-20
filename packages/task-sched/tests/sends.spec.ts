@@ -2,7 +2,7 @@
  * Storage-shape tests for the sends table: soonest-first ordering in both
  * the memory fallback and the durable domain, and durability across a full
  * close/reopen over the same json medium.
- * @module @task-center/task-sched/tests/sends
+ * @module dsh-task-center-task-sched/tests/sends
  */
 
 import { afterAll, describe, expect, it } from 'vitest'

@@ -3,7 +3,7 @@
  * the web client's /api channel) and its browser consumers (the session-page
  * surfaces and the board detail). Pure JSON-safe shapes: optional facts are
  * OMITTED keys, never `undefined`/`null`.
- * @module @task-center/task-sched/wire
+ * @module dsh-task-center-task-sched/wire
  */
 
 /** Lifecycle of one scheduled send. */

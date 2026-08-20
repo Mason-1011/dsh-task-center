@@ -1,4 +1,4 @@
-# @task-center/tool-task
+# dsh-task-center-tool-task
 
 **用途一句话**:任务接缝的模型面——七个任务工具加一段系统提示词"任务纪律",全局注册(形态 4,仿 tool-goal)。
 

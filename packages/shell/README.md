@@ -1,4 +1,4 @@
-# @task-center/shell
+# dsh-task-center-shell
 
 **用途一句话**:指挥中心的一张脸——一条命令把整套组装(cordis.yml:任务接缝 + 工具/命令面 + wake/quota/reaper 常驻)经真实 Loader 拉起来,交互终端接一个行式 REPL:斜杠行走命令注册表(不进模型),普通行作为一条用户消息发给常驻交互会话,助手文本与工具调用从会话事件流实时回显。
 

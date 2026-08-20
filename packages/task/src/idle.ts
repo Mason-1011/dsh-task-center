@@ -3,7 +3,7 @@
  * days since a task was last *worked*, the subtree-aware effective idle under
  * live delegation, and the display-side join with the holder session's live
  * activity. Pure functions over view readers — no context.
- * @module @task-center/task/idle
+ * @module dsh-task-center-task/idle
  */
 
 import type { SessionId } from '@deepseek-ai/dsh-session'

@@ -3,7 +3,7 @@
  * backend, the domain facility, the task seam, and `task-local` mounted as
  * real Cordis plugins. Durability is asserted by restarting over the same
  * medium on disk.
- * @module @task-center/task-local/tests/local
+ * @module dsh-task-center-task-local/tests/local
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -15,8 +15,8 @@ import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { TaskService } from '@task-center/task'
-import type { TaskActor } from '@task-center/task'
+import { TaskService } from 'dsh-task-center-task'
+import type { TaskActor } from 'dsh-task-center-task'
 import * as TaskLocal from '../src/index.ts'
 
 const roots: string[] = []

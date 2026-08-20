@@ -3,7 +3,7 @@
  * compare-and-set mutation, the dual-ledger write (domain event first,
  * session receipt second), and `task/changed` notifications.
  * Spec: docs/design/05-seam-spec.md. Slice 1 of docs/design/04-plan.md.
- * @module @task-center/task
+ * @module dsh-task-center-task
  */
 
 import { randomUUID } from 'node:crypto'

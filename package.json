@@ -1,5 +1,5 @@
 {
-  "name": "dsh-task-center",
+  "name": "dsh-task-center-repo",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -14,12 +14,12 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@task-center/task-source": "workspace:*",
+    "dsh-task-center-task-source": "workspace:*",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0-beta",
     "vitest": "^3.0.0"
   },
   "peerDependencies": {
-    "@task-center/task-source": "workspace:*"
+    "dsh-task-center-task-source": "workspace:*"
   }
 }

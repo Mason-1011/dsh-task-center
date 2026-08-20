@@ -6,12 +6,12 @@
   name: '@deepseek-ai/dsh-session'
 
 - id: tasks
-  name: '@task-center/task'
+  name: 'dsh-task-center-task'
   config:
     contextPackByteLimit: 2000
     listDefaultLimit: 20
 
 - id: task-web
-  name: '@task-center/task-web'
+  name: 'dsh-task-center-task-web'
   config:
     staleDays: 3

@@ -4,7 +4,7 @@
  * walk 创建 → 认领 → 推进 → 提交 through the five task tools — and the human
  * actor closes it with `/task approve`. Self-skips without DEEPSEEK_API_KEY,
  * matching the harness e2e key policy.
- * @module @task-center/tool-task/tests/loop-e2e
+ * @module dsh-task-center-tool-task/tests/loop-e2e
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -23,9 +23,9 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import * as CommandTask from '@task-center/command-task'
-import * as TaskLocal from '@task-center/task-local'
+import { TaskService } from 'dsh-task-center-task'
+import * as CommandTask from 'dsh-task-center-command-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
 import * as ToolTask from '../src/index.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'task-loop-'))

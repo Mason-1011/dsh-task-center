@@ -3,7 +3,7 @@
  * `currentColor`, square 14 px — for concepts the primitives set does not
  * ship (scheduled time). Kept beside the consumers that inline them into
  * text lines; sizing rides the `size` prop like the official icons.
- * @module @task-center/task-sched/client/icons
+ * @module dsh-task-center-task-sched/client/icons
  */
 
 /** A minimal outline clock: ring + hands, stroked to sit inside a text line. */

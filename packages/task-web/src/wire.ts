@@ -3,12 +3,12 @@
  * browser kanban client. Pure JSON-safe shapes: optional facts are OMITTED
  * keys, never `undefined`/`null` — the gateway rejects undefined values, and
  * the client treats absence as "not applicable".
- * @module @task-center/task-web/wire
+ * @module dsh-task-center-task-web/wire
  */
 
-import type { CandidateStatus, TaskStatus } from '@task-center/task'
+import type { CandidateStatus, TaskStatus } from 'dsh-task-center-task'
 
-export type { CandidateStatus, TaskStatus } from '@task-center/task'
+export type { CandidateStatus, TaskStatus } from 'dsh-task-center-task'
 
 /** Human-triggered card action; each maps onto one seam mutation. */
 export type BoardAction = 'approve' | 'reject' | 'block' | 'release' | 'abandon'

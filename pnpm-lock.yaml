@@ -19,18 +19,78 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
-      '@task-center/task-source':
-        specifier: workspace:*
-        version: link:packages/task-source
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      dsh-task-center-task-source:
+        specifier: workspace:*
+        version: link:packages/task-source
       typescript:
         specifier: ^5.9.0-beta
         version: 5.9.3
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)
+
+  packages/bundle:
+    dependencies:
+      dsh-task-center-command-task:
+        specifier: workspace:^
+        version: link:../command-task
+      dsh-task-center-task:
+        specifier: workspace:^
+        version: link:../task
+      dsh-task-center-task-local:
+        specifier: workspace:^
+        version: link:../task-local
+      dsh-task-center-task-quota:
+        specifier: workspace:^
+        version: link:../task-quota
+      dsh-task-center-task-reaper:
+        specifier: workspace:^
+        version: link:../task-reaper
+      dsh-task-center-task-sched:
+        specifier: workspace:^
+        version: link:../task-sched
+      dsh-task-center-task-source:
+        specifier: workspace:^
+        version: link:../task-source
+      dsh-task-center-task-wake:
+        specifier: workspace:^
+        version: link:../task-wake
+      dsh-task-center-task-web:
+        specifier: workspace:^
+        version: link:../task-web
+      dsh-task-center-tool-task:
+        specifier: workspace:^
+        version: link:../tool-task
+
+  packages/bundle-headless:
+    dependencies:
+      dsh-task-center-command-task:
+        specifier: workspace:^
+        version: link:../command-task
+      dsh-task-center-task:
+        specifier: workspace:^
+        version: link:../task
+      dsh-task-center-task-local:
+        specifier: workspace:^
+        version: link:../task-local
+      dsh-task-center-task-quota:
+        specifier: workspace:^
+        version: link:../task-quota
+      dsh-task-center-task-reaper:
+        specifier: workspace:^
+        version: link:../task-reaper
+      dsh-task-center-task-source:
+        specifier: workspace:^
+        version: link:../task-source
+      dsh-task-center-task-wake:
+        specifier: workspace:^
+        version: link:../task-wake
+      dsh-task-center-tool-task:
+        specifier: workspace:^
+        version: link:../tool-task
 
   packages/command-task:
     devDependencies:
@@ -61,8 +121,8 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(8dfaf5cf4e4252f9e06e9d6619316e74)
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
 
   packages/shell:
@@ -128,31 +188,31 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1))
-      '@task-center/command-task':
+      dsh-task-center-command-task:
         specifier: workspace:*
         version: link:../command-task
-      '@task-center/task':
+      dsh-task-center-task:
         specifier: workspace:*
         version: link:../task
-      '@task-center/task-local':
+      dsh-task-center-task-local:
         specifier: workspace:*
         version: link:../task-local
-      '@task-center/task-quota':
+      dsh-task-center-task-quota:
         specifier: workspace:*
         version: link:../task-quota
-      '@task-center/task-reaper':
+      dsh-task-center-task-reaper:
         specifier: workspace:*
         version: link:../task-reaper
-      '@task-center/task-source':
+      dsh-task-center-task-source:
         specifier: workspace:*
         version: link:../task-source
-      '@task-center/task-wake':
+      dsh-task-center-task-wake:
         specifier: workspace:*
         version: link:../task-wake
-      '@task-center/task-web':
+      dsh-task-center-task-web:
         specifier: workspace:*
         version: link:../task-web
-      '@task-center/tool-task':
+      dsh-task-center-tool-task:
         specifier: workspace:*
         version: link:../tool-task
 
@@ -185,8 +245,8 @@ importers:
       '@deepseek-ai/dsh-storage-json':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-storage@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)))
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
       zod:
         specifier: ^4.4.3
@@ -230,20 +290,20 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1))
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
-      '@task-center/task-sched':
-        specifier: workspace:*
+      dsh-task-center-task-sched:
+        specifier: workspace:^
         version: link:../task-sched
-      '@task-center/task-source':
-        specifier: workspace:*
+      dsh-task-center-task-source:
+        specifier: workspace:^
         version: link:../task-source
-      '@task-center/task-wake':
-        specifier: workspace:*
+      dsh-task-center-task-wake:
+        specifier: workspace:^
         version: link:../task-wake
-      '@task-center/tool-task':
-        specifier: workspace:*
+      dsh-task-center-tool-task:
+        specifier: workspace:^
         version: link:../tool-task
       zod:
         specifier: ^4.4.3
@@ -272,8 +332,8 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(8dfaf5cf4e4252f9e06e9d6619316e74)
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
 
   packages/task-sched:
@@ -317,18 +377,18 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1))
-      '@task-center/task':
-        specifier: workspace:*
-        version: link:../task
-      '@task-center/task-quota':
-        specifier: workspace:*
-        version: link:../task-quota
-      '@task-center/task-source':
-        specifier: workspace:*
-        version: link:../task-source
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
+      dsh-task-center-task:
+        specifier: workspace:^
+        version: link:../task
+      dsh-task-center-task-quota:
+        specifier: workspace:^
+        version: link:../task-quota
+      dsh-task-center-task-source:
+        specifier: workspace:^
+        version: link:../task-source
       esbuild:
         specifier: ^0.27.0
         version: 0.27.7
@@ -395,11 +455,11 @@ importers:
       '@deepseek-ai/dsh-user-approval':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(380a43f4d6510c4a5dfadf54dc7f17a7)
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
-      '@task-center/task-local':
-        specifier: workspace:*
+      dsh-task-center-task-local:
+        specifier: workspace:^
         version: link:../task-local
       zod:
         specifier: ^4.4.3
@@ -440,14 +500,14 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(8dfaf5cf4e4252f9e06e9d6619316e74)
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
-      '@task-center/task-local':
-        specifier: workspace:*
+      dsh-task-center-task-local:
+        specifier: workspace:^
         version: link:../task-local
-      '@task-center/tool-task':
-        specifier: workspace:*
+      dsh-task-center-tool-task:
+        specifier: workspace:^
         version: link:../tool-task
 
   packages/task-web:
@@ -467,18 +527,18 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: 0.1.0-rc.8
         version: 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1))
-      '@task-center/task':
-        specifier: workspace:*
-        version: link:../task
-      '@task-center/task-quota':
-        specifier: workspace:*
-        version: link:../task-quota
-      '@task-center/task-sched':
-        specifier: workspace:*
-        version: link:../task-sched
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
+      dsh-task-center-task:
+        specifier: workspace:^
+        version: link:../task
+      dsh-task-center-task-quota:
+        specifier: workspace:^
+        version: link:../task-quota
+      dsh-task-center-task-sched:
+        specifier: workspace:^
+        version: link:../task-sched
       esbuild:
         specifier: ^0.27.0
         version: 0.27.7
@@ -524,17 +584,17 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(8dfaf5cf4e4252f9e06e9d6619316e74)
-      '@task-center/command-task':
-        specifier: workspace:*
+      dsh-task-center-command-task:
+        specifier: workspace:^
         version: link:../command-task
-      '@task-center/task':
-        specifier: workspace:*
+      dsh-task-center-task:
+        specifier: workspace:^
         version: link:../task
-      '@task-center/task-local':
-        specifier: workspace:*
+      dsh-task-center-task-local:
+        specifier: workspace:^
         version: link:../task-local
-      '@task-center/task-reaper':
-        specifier: workspace:*
+      dsh-task-center-task-reaper:
+        specifier: workspace:^
         version: link:../task-reaper
 
 packages:

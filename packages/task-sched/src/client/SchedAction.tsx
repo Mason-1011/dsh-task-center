@@ -5,7 +5,7 @@
  * settle notes inline), cancel on every unsettled row. The dock row echoes
  * the pending chips above the composer so an armed send is visible without
  * opening anything.
- * @module @task-center/task-sched/client/SchedAction
+ * @module dsh-task-center-task-sched/client/SchedAction
  */
 
 import { useEffect, useState } from 'react'

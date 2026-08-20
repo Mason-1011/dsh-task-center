@@ -4,14 +4,14 @@
  * the human actor: approve and reject are legal only here, and the human path
  * writes domain events only (no session receipts), per the authority matrix.
  * Spec: docs/design/03-plugins.md (command-task), 05-seam-spec.md §1.
- * @module @task-center/command-task
+ * @module dsh-task-center-command-task
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandResult } from '@deepseek-ai/dsh-commands'
-import { effectiveIdle, lastSessionActivity } from '@task-center/task'
-import type { CandidateView, HolderActivity, ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from '@task-center/task'
-import { describeWake } from '@task-center/task'
+import { effectiveIdle, lastSessionActivity } from 'dsh-task-center-task'
+import type { CandidateView, HolderActivity, ProjectView, TaskError, TaskId, TaskStatus, TaskView, WakeRule } from 'dsh-task-center-task'
+import { describeWake } from 'dsh-task-center-task'
 
 /** Cordis plugin name. */
 export const name = 'command-task'
@@ -20,7 +20,7 @@ export const name = 'command-task'
 export const inject = ['tasks', 'sessions', 'commands']
 
 // Re-exported for existing importers; the implementation moved to the seam.
-export { idleDays } from '@task-center/task'
+export { idleDays } from 'dsh-task-center-task'
 
 /** Deployment knobs for the human face (no hardcoded tunables). */
 export interface Config {

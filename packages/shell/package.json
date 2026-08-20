@@ -1,5 +1,5 @@
 {
-  "name": "@task-center/shell",
+  "name": "dsh-task-center-shell",
   "license": "MIT",
   "version": "0.0.0",
   "private": true,
@@ -33,15 +33,15 @@
     "@deepseek-ai/dsh-storage-json": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
-    "@task-center/command-task": "workspace:*",
-    "@task-center/task": "workspace:*",
-    "@task-center/task-local": "workspace:*",
-    "@task-center/task-quota": "workspace:*",
-    "@task-center/task-reaper": "workspace:*",
-    "@task-center/task-source": "workspace:*",
-    "@task-center/task-wake": "workspace:*",
-    "@task-center/task-web": "workspace:*",
-    "@task-center/tool-task": "workspace:*"
+    "dsh-task-center-command-task": "workspace:*",
+    "dsh-task-center-task": "workspace:*",
+    "dsh-task-center-task-local": "workspace:*",
+    "dsh-task-center-task-quota": "workspace:*",
+    "dsh-task-center-task-reaper": "workspace:*",
+    "dsh-task-center-task-source": "workspace:*",
+    "dsh-task-center-task-wake": "workspace:*",
+    "dsh-task-center-task-web": "workspace:*",
+    "dsh-task-center-tool-task": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -62,15 +62,15 @@
     "@deepseek-ai/dsh-storage-json": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
-    "@task-center/command-task": "workspace:*",
-    "@task-center/task": "workspace:*",
-    "@task-center/task-local": "workspace:*",
-    "@task-center/task-quota": "workspace:*",
-    "@task-center/task-reaper": "workspace:*",
+    "dsh-task-center-command-task": "workspace:*",
+    "dsh-task-center-task": "workspace:*",
+    "dsh-task-center-task-local": "workspace:*",
+    "dsh-task-center-task-quota": "workspace:*",
+    "dsh-task-center-task-reaper": "workspace:*",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.8",
-    "@task-center/task-source": "workspace:*",
-    "@task-center/task-wake": "workspace:*",
-    "@task-center/task-web": "workspace:*",
-    "@task-center/tool-task": "workspace:*"
+    "dsh-task-center-task-source": "workspace:*",
+    "dsh-task-center-task-wake": "workspace:*",
+    "dsh-task-center-task-web": "workspace:*",
+    "dsh-task-center-tool-task": "workspace:*"
   }
 }

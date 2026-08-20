@@ -5,12 +5,12 @@
  * latter two ride the scheduled-send channel, exactly like a human-scheduled
  * `cont`. Every flip awaits its RPC and re-renders from the returned
  * effective value; failures land inline.
- * @module @task-center/task-web/client/QuotaForm
+ * @module dsh-task-center-task-web/client/QuotaForm
  */
 
 import { useEffect, useState } from 'react'
 import { Button, IconChevronDownOutline14, Modal, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { QuotaGetResult, QuotaSetResult, QuotaTargetSetResult } from '@task-center/task-quota'
+import type { QuotaGetResult, QuotaSetResult, QuotaTargetSetResult } from 'dsh-task-center-task-quota'
 import type { SessionOption, SessionsResult } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 import { callApi } from './api.ts'

@@ -4,7 +4,7 @@
  * (the ⏰ button that opens the scheduling modal) and the input dock row
  * (pending-send chips above the composer). Both live in the conversation's
  * own declared slots, so they exist exactly while a session page is mounted.
- * @module @task-center/task-sched/client
+ * @module dsh-task-center-task-sched/client
  */
 
 import type { ClientContext } from './context.ts'

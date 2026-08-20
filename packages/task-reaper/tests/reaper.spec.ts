@@ -3,7 +3,7 @@
  * holding loses its hold immediately, and the boot sweep releases only holds
  * absent from the live store (crash recovery) — live holders and review-held
  * submissions are untouched.
- * @module @task-center/task-reaper/tests/reaper
+ * @module dsh-task-center-task-reaper/tests/reaper
  */
 
 import { describe, expect, it } from 'vitest'
@@ -15,8 +15,8 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import type { TaskHandle } from '@task-center/task'
+import { TaskService } from 'dsh-task-center-task'
+import type { TaskHandle } from 'dsh-task-center-task'
 import * as TaskReaper from '../src/index.ts'
 
 /** Boot the spine plus the task seam, without the reaper. */

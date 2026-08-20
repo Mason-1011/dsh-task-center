@@ -5,7 +5,7 @@
  * its cordis plugin applies into exactly two slot registrations (sidebar
  * footer button + shell overlay) with function components; faces carry the
  * connection service, the overlay additionally the session jump.
- * @module @task-center/task-web/tests/client
+ * @module dsh-task-center-task-web/tests/client
  */
 
 import { describe, expect, it } from 'vitest'
@@ -43,7 +43,7 @@ describe('task-web client bundle', () => {
   it('hands itself to the ModuleLoader under the package id, seeds only', async () => {
     const { code, handoff } = await loadBundle()
     expect(code.startsWith('window.__ModuleLoader__.load({')).toBe(true)
-    expect(handoff.id).toBe('@task-center/task-web')
+    expect(handoff.id).toBe('dsh-task-center-task-web')
     // Only platform seeds are required; the official UI primitives must come
     // from the shell's seed (the npm copy is unstyled — bundling it is a bug).
     const specs = new Set([...code.matchAll(/require\((["'])(.+?)\1\)/g)].map(match => match[2]))

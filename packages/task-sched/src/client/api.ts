@@ -3,7 +3,7 @@
  * lives here: keys whose value is undefined are dropped before send, and
  * transport failures fold into the same `{ok:false,code,message}` vocabulary
  * the host methods return, so callers never see a second error shape.
- * @module @task-center/task-sched/client/api
+ * @module dsh-task-center-task-sched/client/api
  */
 
 import type { SchedError } from '../wire.ts'

@@ -2,7 +2,7 @@
  * Unit spec for the client's pure label/time helpers: the blocked-reason
  * category mapping the blocked column annotates cards with, and the
  * one-glance wake-time rendering (time-only when the instant lands today).
- * @module @task-center/task-web/tests/labels
+ * @module dsh-task-center-task-web/tests/labels
  */
 
 import { describe, expect, it } from 'vitest'

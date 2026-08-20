@@ -43,7 +43,7 @@ if (offenders.length > 0) {
 }
 
 const envelope = `window.__ModuleLoader__.load({
-  id: "@task-center/task-web",
+  id: "dsh-task-center-task-web",
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;

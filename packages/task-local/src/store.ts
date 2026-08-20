@@ -2,12 +2,12 @@
  * The durable TaskStore over one open task domain. Stream order lives in the
  * fixed-width KV key; each append writes through the domain's durability chain
  * before resolving, so the service publishes only committed state.
- * @module @task-center/task-local/src/store
+ * @module dsh-task-center-task-local/src/store
  */
 
 import { randomUUID } from 'node:crypto'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
-import type { LedgerEvent, LedgerEventInput, TaskEventId, TaskId, TaskStore } from '@task-center/task'
+import type { LedgerEvent, LedgerEventInput, TaskEventId, TaskId, TaskStore } from 'dsh-task-center-task'
 import { taskDomainSpec } from './spec.ts'
 
 /** KV key width; lexicographic order equals append order at any depth. */

@@ -5,7 +5,7 @@
  * compare-and-set, error-code passthrough, and — before any client exists —
  * the SRC signature layer the api-gateway parses from method source
  * (unique plain identifiers, JSON-safe results with omitted optional keys).
- * @module @task-center/shell/tests/task-web
+ * @module dsh-task-center-shell/tests/task-web
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -16,9 +16,9 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { TaskId } from '@task-center/task'
-import type { TaskActor, TaskView } from '@task-center/task'
-import type { BoardPayload } from '@task-center/task-web'
+import { TaskId } from 'dsh-task-center-task'
+import type { TaskActor, TaskView } from 'dsh-task-center-task'
+import type { BoardPayload } from 'dsh-task-center-task-web'
 import { bootComposition } from './boot.ts'
 
 const DAY_MS = 86_400_000

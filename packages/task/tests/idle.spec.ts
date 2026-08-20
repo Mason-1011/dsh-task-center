@@ -3,7 +3,7 @@
  * display-side join with the holder session's live activity (design 06 §7
  * 第一层 — a holder at work keeps its line fresh with zero ledger writes; a
  * session not live in this process falls back to `workedAt`).
- * @module @task-center/task/tests/idle
+ * @module dsh-task-center-task/tests/idle
  */
 
 import { describe, expect, it, vi } from 'vitest'

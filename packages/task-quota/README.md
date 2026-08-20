@@ -1,4 +1,4 @@
-# @task-center/task-quota
+# dsh-task-center-task-quota
 
 **用途一句话**:任务接缝的额度面——`llm/stream` 瀑布监听看着每一次模型调用;当请求以平台额度用尽(`QUOTA`)终死时,在**循环看见失败之前**把垂死会话持有的任务全部挂起:block 写结构化理由(contextPack 记下额度墙与恢复时间)→ release 释放持有(可被新会话认领)→ 到点自动唤醒续做。
 

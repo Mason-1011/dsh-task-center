@@ -5,7 +5,7 @@
  * the service writes both ledgers (domain event plus the session's
  * task/change receipt).
  * Spec: docs/design/05-seam-spec.md §6.
- * @module @task-center/tool-task/src/tools
+ * @module dsh-task-center-tool-task/src/tools
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -13,8 +13,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { TaskActor, TaskError, TaskStatus, TaskView } from '@task-center/task'
-import { TaskId as taskIdOf, ProjectId as projectIdOf } from '@task-center/task'
+import type { TaskActor, TaskError, TaskStatus, TaskView } from 'dsh-task-center-task'
+import { TaskId as taskIdOf, ProjectId as projectIdOf } from 'dsh-task-center-task'
 import {
   internalError,
   LIST_OUTPUT_SCHEMA,

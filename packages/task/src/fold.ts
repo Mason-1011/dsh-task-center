@@ -3,7 +3,7 @@
  * and the domain-event replay fold. No Cordis, no I/O — the live service and
  * the replay fold share this module as the single source of transition truth.
  * Spec: docs/design/05-seam-spec.md §1 and §3.
- * @module @task-center/task/fold
+ * @module dsh-task-center-task/fold
  */
 
 import type { SessionId } from '@deepseek-ai/dsh-session'

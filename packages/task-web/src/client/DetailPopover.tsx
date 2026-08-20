@@ -6,7 +6,7 @@
  * CodeBlock. Every session id — holder and history alike — is a chip that
  * jumps the conversation view to it. Fetched on mount; unknown ids render the
  * host's error code.
- * @module @task-center/task-web/client/DetailPopover
+ * @module dsh-task-center-task-web/client/DetailPopover
  */
 
 import { useEffect, useState } from 'react'

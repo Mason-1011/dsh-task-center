@@ -3,7 +3,7 @@
  * the `datetime-local` input trades in `YYYY-MM-DDTHH:MM` local strings, and
  * board timestamps are for one-glance scanning, so today's instants drop the
  * date.
- * @module @task-center/task-sched/client/time
+ * @module dsh-task-center-task-sched/client/time
  */
 
 /**

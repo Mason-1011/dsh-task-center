@@ -14,7 +14,7 @@
  * slot, one fire-and-forget session refreshes the 现状/下一步/卡点 of every
  * unfinished task through `task_patrol` — observation only, never work.
  * Spec: docs/design/03-plugins.md §2, 05-seam-spec.md §1 and §4.
- * @module @task-center/task-wake
+ * @module dsh-task-center-task-wake
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -24,7 +24,7 @@ import type AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { createUserMessage, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { TaskId, TaskRecord, TaskView, WakeRule } from '@task-center/task'
+import type { TaskId, TaskRecord, TaskView, WakeRule } from 'dsh-task-center-task'
 
 /** Cordis plugin name. */
 export const name = 'task-wake'

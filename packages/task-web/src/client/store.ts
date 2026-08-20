@@ -4,7 +4,7 @@
  * action wrappers that refetch after every mutation. CAS races surface as a
  * notice plus an immediate refresh — two humans clicking the same card never
  * overwrite each other silently.
- * @module @task-center/task-web/client/store
+ * @module dsh-task-center-task-web/client/store
  */
 
 import { useSyncExternalStore } from 'react'

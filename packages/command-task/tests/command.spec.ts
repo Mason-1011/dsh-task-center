@@ -4,7 +4,7 @@
  * grouping, prefix resolution, the closed status guards, shelving visibility
  * (idle days, stale banner), and the `command/run`↔`command/done` lifecycle
  * pairing in the dispatching session.
- * @module @task-center/command-task/tests/command
+ * @module dsh-task-center-command-task/tests/command
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -20,8 +20,8 @@ import * as llmDeepseek from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import type { TaskActor, TaskView } from '@task-center/task'
+import { TaskService } from 'dsh-task-center-task'
+import type { TaskActor, TaskView } from 'dsh-task-center-task'
 import * as CommandTask from '../src/index.ts'
 
 const DAY_MS = 86_400_000

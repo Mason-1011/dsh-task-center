@@ -1,0 +1,42 @@
+{
+  "name": "dsh-task-center-headless",
+  "version": "0.1.0",
+  "description": "Task board for DeepSeek Harness on a fresh profile: the core plugin set plus the storage rows the dsh-base layer does not carry.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mason-1011/dsh-task-center.git",
+    "directory": "packages/bundle-headless"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tasks"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dependencies": {
+    "dsh-task-center-command-task": "workspace:^",
+    "dsh-task-center-task": "workspace:^",
+    "dsh-task-center-task-local": "workspace:^",
+    "dsh-task-center-task-quota": "workspace:^",
+    "dsh-task-center-task-reaper": "workspace:^",
+    "dsh-task-center-task-source": "workspace:^",
+    "dsh-task-center-task-wake": "workspace:^",
+    "dsh-task-center-tool-task": "workspace:^"
+  }
+}

@@ -5,7 +5,7 @@
  * the extraction marks use. With no storage-domain facility mounted the
  * memory fallback keeps one process's sends working and everything durable
  * blank, so minimal assemblies still run.
- * @module @task-center/task-sched/src/sends
+ * @module dsh-task-center-task-sched/src/sends
  */
 
 import { z } from 'zod'

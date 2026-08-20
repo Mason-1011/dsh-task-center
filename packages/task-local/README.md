@@ -1,4 +1,4 @@
-# @task-center/task-local
+# dsh-task-center-task-local
 
 **用途一句话**:任务账本的落盘 Provider——在 dsh storage domain 上开 `task` 域,把接缝的内存账本换成持久实现。
 

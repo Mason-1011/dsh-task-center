@@ -6,7 +6,7 @@
  * never sources, a failing route backs off without covering ground (and
  * recovers when it works again), and a restart over the same roots re-reads
  * nothing the durable marks already covered.
- * @module @task-center/task-source/tests/backlog
+ * @module dsh-task-center-task-source/tests/backlog
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -26,15 +26,15 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import type { TaskView } from '@task-center/task'
+import type { TaskView } from 'dsh-task-center-task'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import * as TaskLocal from '@task-center/task-local'
+import { TaskService } from 'dsh-task-center-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
 import { extractSession, isMachinerySession } from '../src/index.ts'
 import { openMarks } from '../src/marks.ts'
 import type { Config } from '../src/index.ts'

@@ -5,7 +5,7 @@
  * candidate with a filled acceptance draft; the answered question records a
  * none. Self-skips without DEEPSEEK_API_KEY, matching the harness e2e key
  * policy.
- * @module @task-center/task-source/tests/summary-e2e
+ * @module dsh-task-center-task-source/tests/summary-e2e
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -24,8 +24,8 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import * as TaskLocal from '@task-center/task-local'
+import { TaskService } from 'dsh-task-center-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
 import * as TaskSource from '../src/index.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'task-source-'))

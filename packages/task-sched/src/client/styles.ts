@@ -4,7 +4,7 @@
  * idiom). Every color/typography decision is a `--dsw-*` shell token, so the
  * surfaces follow the ambient theme; everything is scoped under `task-sched-`
  * classes so nothing leaks into the shell's CSS.
- * @module @task-center/task-sched/client/styles
+ * @module dsh-task-center-task-sched/client/styles
  */
 
 const CSS = `

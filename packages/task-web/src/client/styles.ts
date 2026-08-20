@@ -6,7 +6,7 @@
  * (light and dark) for free; radii and spacing are literal px per the shell's
  * own convention (controls 8, panels 24). Everything is scoped under
  * `task-web-` classes so the board can never leak into the shell's CSS.
- * @module @task-center/task-web/client/styles
+ * @module dsh-task-center-task-web/client/styles
  */
 
 const CSS = `

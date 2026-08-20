@@ -1,10 +1,10 @@
 /**
  * The task ledger store port. The seam owns the contract; a provider
- * (`@task-center/task-local`, slice 2) supplies the durable implementation over
+ * (`dsh-task-center-task-local`, slice 2) supplies the durable implementation over
  * the dsh storage domain. Tasks, projects, and candidates share one stream.
  * Stores assign `eventId` on append and resolve only after the event is
  * durable, so the service publishes after commit.
- * @module @task-center/task/store
+ * @module dsh-task-center-task/store
  */
 
 import { randomUUID } from 'node:crypto'

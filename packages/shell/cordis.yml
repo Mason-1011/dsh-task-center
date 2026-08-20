@@ -44,16 +44,16 @@
     routes: {}
 
 - id: tasks
-  name: '@task-center/task'
+  name: 'dsh-task-center-task'
   config:
     contextPackByteLimit: 2000
     listDefaultLimit: 20
 
 - id: task-local
-  name: '@task-center/task-local'
+  name: 'dsh-task-center-task-local'
 
 - id: task-source
-  name: '@task-center/task-source'
+  name: 'dsh-task-center-task-source'
   config:
     pollSeconds: 30
     idleHours: 3
@@ -64,15 +64,15 @@
     transcriptEvents: 40
 
 - id: tool-task
-  name: '@task-center/tool-task'
+  name: 'dsh-task-center-tool-task'
 
 - id: command-task
-  name: '@task-center/command-task'
+  name: 'dsh-task-center-command-task'
   config:
     staleDays: 3
 
 - id: task-wake
-  name: '@task-center/task-wake'
+  name: 'dsh-task-center-task-wake'
   config:
     pollSeconds: 30
     agent:
@@ -82,13 +82,13 @@
       at: '09:30'
 
 - id: task-quota
-  name: '@task-center/task-quota'
+  name: 'dsh-task-center-task-quota'
 
 - id: task-reaper
-  name: '@task-center/task-reaper'
+  name: 'dsh-task-center-task-reaper'
 
 - id: shell
-  name: '@task-center/shell'
+  name: 'dsh-task-center-shell'
   config:
     agent:
       provider: deepseek-official

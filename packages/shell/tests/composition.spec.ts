@@ -5,7 +5,7 @@
  * (idle days + stale banner) renders from the same ledger, and the same
  * composition restarted on the same data root still sees the ledger — the
  * one-command launcher's exact boot path minus the native module import.
- * @module @task-center/shell/tests/composition
+ * @module dsh-task-center-shell/tests/composition
  */
 
 import { afterAll, describe, expect, it, vi } from 'vitest'

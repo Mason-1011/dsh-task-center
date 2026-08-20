@@ -4,7 +4,7 @@
  * SessionId, a compile-time cast is the whole runtime, so the factory lives
  * beside its type to export one merged symbol.
  * Spec: docs/design/05-seam-spec.md (this file is its §1–§3 translation).
- * @module @task-center/task/types
+ * @module dsh-task-center-task/types
  */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'

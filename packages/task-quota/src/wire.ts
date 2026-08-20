@@ -3,7 +3,7 @@
  * web board's head toggle reads and flips. Errors cross the wire as
  * `{ok:false,code,message}` envelopes, the same vocabulary as every other
  * task-family remote.
- * @module @task-center/task-quota/wire
+ * @module dsh-task-center-task-quota/wire
  */
 
 /** Domain failure passthrough: the host's error codes reach the client verbatim. */

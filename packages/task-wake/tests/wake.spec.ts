@@ -6,7 +6,7 @@
  * — contained by design, which these tests also prove. The daily patrol gets
  * the full keyless closed loop: a scripted adapter answers the patrol session
  * with a real `task_patrol` tool call, proving observation never unshelves.
- * @module @task-center/task-wake/tests/wake
+ * @module dsh-task-center-task-wake/tests/wake
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -19,9 +19,9 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskId, TaskService } from '@task-center/task'
-import type { TaskHandle } from '@task-center/task'
-import * as ToolTask from '@task-center/tool-task'
+import { TaskId, TaskService } from 'dsh-task-center-task'
+import type { TaskHandle } from 'dsh-task-center-task'
+import * as ToolTask from 'dsh-task-center-tool-task'
 import * as TaskWake from '../src/index.ts'
 
 /** Boot the spine plus task-wake polling every 50ms with a dead provider route. */

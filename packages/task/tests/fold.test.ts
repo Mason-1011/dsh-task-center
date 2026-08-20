@@ -1,7 +1,7 @@
 /**
  * Pure state-machine tests: transition-table guards, authority rules, the
  * bounded context pack, and the replay fold's corruption checks.
- * @module @task-center/task/tests/fold
+ * @module dsh-task-center-task/tests/fold
  */
 
 import { describe, expect, it } from 'vitest'

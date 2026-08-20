@@ -12,7 +12,7 @@
  * domain state. One runner per table is assumed (the web daemon); a row left
  * `firing` by a crash is handed back to pending at boot, so delivery resumes
  * rather than doubles. Errors cross the wire as `{ok:false,code}` envelopes.
- * @module @task-center/task-sched
+ * @module dsh-task-center-task-sched
  */
 
 import { randomUUID } from 'node:crypto'
@@ -27,7 +27,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 // build program; the create-time existence check reads it optionally.
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { recordedPresetSetup } from '@task-center/task-source'
+import { recordedPresetSetup } from 'dsh-task-center-task-source'
 import { memorySends, openSends } from './sends.ts'
 import type { Sends } from './sends.ts'
 import type { SchedCancelResult, SchedCreateResult, SchedListResult, SchedSend } from './wire.ts'

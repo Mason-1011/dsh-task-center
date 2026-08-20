@@ -4,7 +4,7 @@
  * instants drop the date; the `datetime-local` input trades in local
  * `YYYY-MM-DDTHH:MM` strings. (The sched bundle carries its own copies —
  * browser bundles share only the platform seeds.)
- * @module @task-center/task-web/client/time
+ * @module dsh-task-center-task-web/client/time
  */
 
 /**

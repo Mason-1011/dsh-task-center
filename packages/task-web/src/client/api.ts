@@ -4,7 +4,7 @@
  * rejects extra keys and undefined values), and transport failures fold into
  * the same `{ok:false,code,message}` vocabulary the host methods return, so
  * callers never see a second error shape.
- * @module @task-center/task-web/client/api
+ * @module dsh-task-center-task-web/client/api
  */
 
 import type { RpcError } from '../wire.ts'

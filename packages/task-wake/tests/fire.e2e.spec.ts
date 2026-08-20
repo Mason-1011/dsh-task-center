@@ -4,7 +4,7 @@
  * fires, claims the task, works it, and submits for review — with no human in
  * the loop beyond setting the rule. Self-skips without DEEPSEEK_API_KEY,
  * matching the harness e2e key policy.
- * @module @task-center/task-wake/tests/fire-e2e
+ * @module dsh-task-center-task-wake/tests/fire-e2e
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -22,11 +22,11 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import type { TaskId } from '@task-center/task'
-import * as TaskLocal from '@task-center/task-local'
+import { TaskService } from 'dsh-task-center-task'
+import type { TaskId } from 'dsh-task-center-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
 import * as TaskWake from '../src/index.ts'
-import * as ToolTask from '@task-center/tool-task'
+import * as ToolTask from 'dsh-task-center-tool-task'
 
 const root = await mkdtemp(join(tmpdir(), 'task-wake-'))
 const ctx = new Context()

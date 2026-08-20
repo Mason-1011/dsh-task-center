@@ -3,7 +3,7 @@
  * backend and swaps the task seam's ledger from the in-memory default to the
  * durable {@link DomainTaskStore}. Backend routing is the storage-domain
  * plugin's config, not this plugin's.
- * @module @task-center/task-local
+ * @module dsh-task-center-task-local
  */
 
 import type { Context } from '@deepseek-ai/cordis'

@@ -6,7 +6,7 @@
  * boot sweep, disposed-session immediacy, and the summarizer tier — verdict
  * parsing, the judged prompt, the keyless closed loop through a scripted
  * adapter, the per-tick cap, and the quota wall.
- * @module @task-center/task-source/tests/source
+ * @module dsh-task-center-task-source/tests/source
  */
 
 import { describe, expect, it } from 'vitest'
@@ -21,8 +21,8 @@ import { SESSION_FORMAT_VERSION, Session, SessionId, SessionStore } from '@deeps
 import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService, TaskId } from '@task-center/task'
-import type { CandidateView, TaskMutation, TaskView } from '@task-center/task'
+import { TaskService, TaskId } from 'dsh-task-center-task'
+import type { CandidateView, TaskMutation, TaskView } from 'dsh-task-center-task'
 import { buildSummaryPrompt, extractSession, foldApprovedPlan, foldGoals, foldTodos, foldUnverifiedCompletions, parseVerdict, summarize } from '../src/index.ts'
 import type { Config, SummaryRequest } from '../src/index.ts'
 import * as TaskSource from '../src/index.ts'

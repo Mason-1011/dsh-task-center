@@ -5,7 +5,7 @@
  * Loader — task seam, tools, commands, wake timer, quota guard, reaper, and
  * the interactive shell. Interactive terminals get the REPL; piped stdin ends
  * the process cleanly on EOF.
- * @module @task-center/shell/bin
+ * @module dsh-task-center-shell/bin
  */
 
 import { parseArgs } from 'node:util'

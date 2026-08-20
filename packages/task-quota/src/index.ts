@@ -15,7 +15,7 @@
  * runtime-choosable: a fresh wake session (default), the session that hit
  * the wall, or one named session — the latter two ride the scheduled-send
  * channel at the reset instant, exactly like a human-scheduled `cont`.
- * @module @task-center/task-quota
+ * @module dsh-task-center-task-quota
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -26,8 +26,8 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 // Type-only: carries the `task-sched` service augmentation into the build
 // program; the reset-point send rides it when present, otherwise the wake
 // rule takes over.
-import type { SchedBoardService } from '@task-center/task-sched'
-import type { TaskActor, TaskRecord, TaskView } from '@task-center/task'
+import type { SchedBoardService } from 'dsh-task-center-task-sched'
+import type { TaskActor, TaskRecord, TaskView } from 'dsh-task-center-task'
 import { decide, parkLine } from './signal.ts'
 import type { ParkDecision, ResumeTarget } from './signal.ts'
 import { memoryResume, openResume } from './state.ts'

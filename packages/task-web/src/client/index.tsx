@@ -3,7 +3,7 @@
  * Two slot registrations over the client runtime — the sidebar footer entry
  * button and the full-screen board overlay — plus a quiet priming fetch so the
  * button's ⚠ dot reflects real staleness before the board is ever opened.
- * @module @task-center/task-web/client
+ * @module dsh-task-center-task-web/client
  */
 
 import { BoardButton, BoardOverlay } from './Board.tsx'

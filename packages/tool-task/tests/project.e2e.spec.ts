@@ -4,7 +4,7 @@
  * the exact id from that listing, and verifies the scoped task_query. Proves
  * the model can navigate human-managed grouping without inventing ids.
  * Self-skips without DEEPSEEK_API_KEY.
- * @module @task-center/tool-task/tests/project-e2e
+ * @module dsh-task-center-tool-task/tests/project-e2e
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -22,8 +22,8 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import * as TaskLocal from '@task-center/task-local'
+import { TaskService } from 'dsh-task-center-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
 import * as ToolTask from '../src/index.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'task-project-'))

@@ -6,7 +6,7 @@
  * compare-and-set collisions retry once then drop, and a disposed session
  * flushes the turn it died in without a receipt — and the goal mirror:
  * decisive goal transitions park or submit the held tasks.
- * @module @task-center/task-source/tests/reflow
+ * @module dsh-task-center-task-source/tests/reflow
  */
 
 import { describe, expect, it } from 'vitest'
@@ -20,8 +20,8 @@ import { Session, SessionId, SessionStore } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import type { TaskView } from '@task-center/task'
+import { TaskService } from 'dsh-task-center-task'
+import type { TaskView } from 'dsh-task-center-task'
 import { foldEvidence, foldGoalMirrors, reflowHeldTasks, renderEvidence } from '../src/index.ts'
 import * as TaskSource from '../src/index.ts'
 

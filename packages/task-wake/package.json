@@ -1,19 +1,37 @@
 {
-  "name": "@task-center/task-wake",
+  "name": "dsh-task-center-task-wake",
+  "version": "0.1.0",
+  "description": "Wake-rule patrol: fires fresh sessions when tasks come due.",
   "license": "MIT",
-  "version": "0.0.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mason-1011/dsh-task-center.git",
+    "directory": "packages/task-wake"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tasks",
+    "scheduler"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-agent-loop": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-session": "^0.1.0-rc.8",
-    "@task-center/task": "workspace:*"
+    "dsh-task-center-task": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -27,8 +45,8 @@
     "@deepseek-ai/dsh-llm-deepseek": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
-    "@task-center/task": "workspace:*",
-    "@task-center/task-local": "workspace:*",
-    "@task-center/tool-task": "workspace:*"
+    "dsh-task-center-task": "workspace:^",
+    "dsh-task-center-task-local": "workspace:^",
+    "dsh-task-center-tool-task": "workspace:^"
   }
 }

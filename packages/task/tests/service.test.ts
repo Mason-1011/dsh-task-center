@@ -1,7 +1,7 @@
 /**
  * Service tests over a real Cordis Context and a detached Session: the full
  * lifecycle, the dual-ledger receipts, compare-and-set, and wake rules.
- * @module @task-center/task/tests/service
+ * @module dsh-task-center-task/tests/service
  */
 
 import { describe, expect, it } from 'vitest'

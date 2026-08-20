@@ -1,4 +1,4 @@
-# @task-center/task-source
+# dsh-task-center-task-source
 
 **用途一句话**:任务接缝的抽取面(设计稿 [06-extraction.md](../../docs/design/06-extraction.md))——常驻扫描 dsh 自己的会话记录,把用户已经开始但被搁下的活自动出生为「候选」,人确认后才进任务台账;任务创建不再是会话之外的仪式。同一条流还做**进度回流**(持有会话每回合的 todo/goal 证据自动写进它所持任务的上下文包)与**打回回流**(验收出生被打回时,理由自动推回来源会话让它认领重做)。
 
@@ -75,4 +75,4 @@
 - 史扫对 fork/resume 子会话(继承父历史前缀)会重复出生父会话已出的候选(去重键含 sessionId);真实使用出现再按 `seedLength` 前缀豁免。
 - 多 goal 并发于同一任务:镜像按事件序应用,后到者可能撞转换表被丢(block 后 complete 来自不同 goal 时 submit 从 blocked 不合法)——v1 已知限制,人从面板与 pack 证据行可见。
 - goal resume 不反向镜像(阻塞任务不会因 goal 恢复自动回 active):解阻塞仍由模型的 task_update/progress 承担。
-- 第一层闲置显示连接是纯展示 join,住 `@task-center/task`。
+- 第一层闲置显示连接是纯展示 join,住 `dsh-task-center-task`。

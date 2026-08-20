@@ -5,7 +5,7 @@
  * re-pays for covered ground. The task ledger is untouched: a mark is
  * extractor bookkeeping, not domain state, the same way dsh's projection
  * cache keeps its checkpoint outside the session stream.
- * @module @task-center/task-source/src/marks
+ * @module dsh-task-center-task-source/src/marks
  */
 
 import { z } from 'zod'

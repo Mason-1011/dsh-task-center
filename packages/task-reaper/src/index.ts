@@ -7,13 +7,13 @@
  * actor — domain events only, honest attribution, no session receipt.
  * The fold pins the system actor to `release` alone; liveness itself is
  * judged here, outside the ledger.
- * @module @task-center/task-reaper
+ * @module dsh-task-center-task-reaper
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 // Type-only: carries the Context.tasks augmentation into src-only builds.
-import type {} from '@task-center/task'
+import type {} from 'dsh-task-center-task'
 
 /** Cordis plugin name. */
 export const name = 'task-reaper'

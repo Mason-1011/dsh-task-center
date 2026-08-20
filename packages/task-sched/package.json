@@ -1,20 +1,31 @@
 {
-  "name": "@task-center/task-sched",
+  "name": "dsh-task-center-task-sched",
+  "version": "0.1.0",
+  "description": "Scheduled sends: deliver a user message into a session at a chosen time.",
   "license": "MIT",
-  "version": "0.0.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mason-1011/dsh-task-center.git",
+    "directory": "packages/task-sched"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "scheduler",
+    "sessions"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
     "./package.json": "./package.json"
   },
-  "dsh": {
-    "client": {
-      "platform": "web",
-      "inject": []
-    }
-  },
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.8",
@@ -23,7 +34,7 @@
     "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-storage-domain": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.8",
-    "@task-center/task-source": "workspace:*",
+    "dsh-task-center-task-source": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -40,12 +51,18 @@
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.8",
-    "@task-center/task": "workspace:*",
-    "@task-center/task-quota": "workspace:*",
-    "@task-center/task-source": "workspace:*",
+    "dsh-task-center-task": "workspace:^",
+    "dsh-task-center-task-quota": "workspace:^",
+    "dsh-task-center-task-source": "workspace:^",
     "@types/react": "^18.3.0",
     "esbuild": "^0.27.0",
     "react": "^18.2.0",
     "zod": "^4.4.3"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
   }
 }

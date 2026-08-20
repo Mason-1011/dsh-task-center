@@ -64,7 +64,7 @@ Task data uses a **double ledger**: the authoritative append-only event stream (
 
 ```
 docs/design/   Design archive (product definition, data model, seam specs, plan, extraction layer — Chinese)
-packages/      @task-center/* plugin packages (pnpm workspace)
+packages/      dsh-task-center-* plugin packages (pnpm workspace)
 ```
 
 ## Install
@@ -113,15 +113,15 @@ A profile is initialized from its template on first use (`web` / `headless` ship
         backend: json
         routes: {}
     - id: tasks
-      name: '@task-center/task'
+      name: 'dsh-task-center-task'
       config:
         contextPackByteLimit: 2000
         listDefaultLimit: 20
     - id: task-local
-      name: '@task-center/task-local'
+      name: 'dsh-task-center-task-local'
       config: {}
     - id: task-source
-      name: '@task-center/task-source'
+      name: 'dsh-task-center-task-source'
       config:
         pollSeconds: 30
         idleHours: 3
@@ -131,14 +131,14 @@ A profile is initialized from its template on first use (`web` / `headless` ship
         summariesPerTick: 2
         transcriptEvents: 40
     - id: tool-task
-      name: '@task-center/tool-task'
+      name: 'dsh-task-center-tool-task'
       config: {}
     - id: command-task
-      name: '@task-center/command-task'
+      name: 'dsh-task-center-command-task'
       config:
         staleDays: 3
     - id: task-wake
-      name: '@task-center/task-wake'
+      name: 'dsh-task-center-task-wake'
       config:
         pollSeconds: 30
         agent:
@@ -147,10 +147,10 @@ A profile is initialized from its template on first use (`web` / `headless` ship
         patrol:
           at: '09:30'
     - id: task-quota
-      name: '@task-center/task-quota'
+      name: 'dsh-task-center-task-quota'
       config: {}
     - id: task-reaper
-      name: '@task-center/task-reaper'
+      name: 'dsh-task-center-task-reaper'
       config: {}
 ```
 
@@ -194,11 +194,11 @@ Append to the web profile's `cordis.patch.yml` after the command-task row:
 
 ```yaml
     - id: task-web
-      name: '@task-center/task-web'
+      name: 'dsh-task-center-task-web'
       config:
         staleDays: 3
     - id: task-sched
-      name: '@task-center/task-sched'
+      name: 'dsh-task-center-task-sched'
       config:
         pollSeconds: 30
         agent:

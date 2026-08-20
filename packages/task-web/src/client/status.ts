@@ -2,7 +2,7 @@
  * Status vocabulary shared by every board surface: the zh label and the
  * official StateDot state that renders beside it. `todo` maps to undefined —
  * the primitive has no neutral state, and an undotted 待办 reads correctly.
- * @module @task-center/task-web/client/status
+ * @module dsh-task-center-task-web/client/status
  */
 
 import type { TaskStatus } from '../wire.ts'

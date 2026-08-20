@@ -4,7 +4,7 @@
  * any surface is mounted, and the action wrappers that refetch after every
  * mutation. The store serves both session-page surfaces; the board detail
  * calls the same RPCs directly from its own bundle.
- * @module @task-center/task-sched/client/store
+ * @module dsh-task-center-task-sched/client/store
  */
 
 import { useSyncExternalStore } from 'react'

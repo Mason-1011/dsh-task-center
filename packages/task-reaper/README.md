@@ -1,4 +1,4 @@
-# @task-center/task-reaper
+# dsh-task-center-task-reaper
 
 **用途一句话**:任务接缝的存活面——持有任务的会话死了,自动释放持有,卡死的任务不再需要人工 `/task release`。
 

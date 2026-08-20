@@ -5,7 +5,7 @@
  * turn; assistant text and tool calls echo live off the session event stream.
  * The plugin composes the center even without a TTY (tests, pipes): the REPL
  * attaches only to a real terminal.
- * @module @task-center/shell
+ * @module dsh-task-center-shell
  */
 
 import type { Context } from '@deepseek-ai/cordis'

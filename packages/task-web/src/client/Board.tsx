@@ -7,7 +7,7 @@
  * creation form, and
  * per-card detail. Chrome comes from the official primitives (Button/Pill/
  * StateDot/Toast + icons); state lives in the store, these are projections.
- * @module @task-center/task-web/client/Board
+ * @module dsh-task-center-task-web/client/Board
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -22,7 +22,7 @@ import {
   StateDot,
   Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { QuotaGetResult, QuotaSetResult } from '@task-center/task-quota'
+import type { QuotaGetResult, QuotaSetResult } from 'dsh-task-center-task-quota'
 import type { TaskCard, TaskStatus } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 import { callApi } from './api.ts'

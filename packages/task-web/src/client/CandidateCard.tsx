@@ -4,7 +4,7 @@
  * the extractor cannot know the human's done bar) plus an optional objective
  * override; 忽略 is terminal for the origin. No detail surface: everything the
  * human needs is on the card.
- * @module @task-center/task-web/client/CandidateCard
+ * @module dsh-task-center-task-web/client/CandidateCard
  */
 
 import { useState } from 'react'

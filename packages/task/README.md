@@ -1,4 +1,4 @@
-# @task-center/task
+# dsh-task-center-task
 
 **用途一句话**:任务接缝的定义件——状态机、双账本写入与 `task/changed` 活事件的唯一事实源。
 

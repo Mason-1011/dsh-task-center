@@ -3,7 +3,7 @@
  * bundle runs inside the dsh web client's cordis runtime; these describe just
  * the surface we call, so nothing beyond the react-family platform seeds is
  * ever required at runtime.
- * @module @task-center/task-sched/client/context
+ * @module dsh-task-center-task-sched/client/context
  */
 
 /** Face a slot occupant receives (plus whatever the owner injects). */

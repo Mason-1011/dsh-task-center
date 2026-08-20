@@ -2,7 +2,7 @@
  * The input dock row: one chip per pending send for the open session
  * (content + due time + ✕ to cancel), rendered only while at least one is
  * armed — the quiet case stays visually absent, exactly like an unset timer.
- * @module @task-center/task-sched/client/SchedDock
+ * @module dsh-task-center-task-sched/client/SchedDock
  */
 
 import { useEffect } from 'react'

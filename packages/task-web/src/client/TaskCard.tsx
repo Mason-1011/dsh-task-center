@@ -3,7 +3,7 @@
  * objective, the shelving markers, and the per-status action row over the
  * official Button. Reason-requiring actions (打回/阻塞) expand an inline
  * official Input instead of prompting.
- * @module @task-center/task-web/client/TaskCard
+ * @module dsh-task-center-task-web/client/TaskCard
  */
 
 import { Fragment, useState } from 'react'

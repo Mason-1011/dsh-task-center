@@ -6,7 +6,7 @@
  * extraction marks and the scheduled sends use. With no storage-domain
  * facility mounted the memory fallback keeps one process's knob working and
  * everything durable blank, so minimal assemblies still run.
- * @module @task-center/task-quota/src/state
+ * @module dsh-task-center-task-quota/src/state
  */
 
 import { z } from 'zod'

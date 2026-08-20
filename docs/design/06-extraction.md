@@ -90,7 +90,7 @@
 
 出生之后,进度回流现状全靠模型自觉(`task_update`/`task_report`),会话干了一下午不汇报,台账就撒谎("闲置 3 天"而活干了一半)。与出生同一思路:会话日志里已有进度证据,让它们自动回流。**只有持有会话的信号回流**;陌生会话依法不能动别人的任务,子任务各有各的持有者,父任务闲置已按子树取新鲜值。
 
-**第一层·活跃度(零写入,展示侧连接,片 7a 已实现)**:闲置显示取 `max(台账 workedAt, 持有会话最后事件时间)` —— 持有会话在动 = 这条线没被搁下。不产生账本事件,不与模型自身的 task_update 撞版本号(CAS)。持有会话不在进程内(已死/未运行)时退回台账 workedAt。`session/end-seed` 是挂载时打的账面标记,不算活动 —— 从盘上恢复的会话不能因为被挂载就显得新鲜。落地归属:`effectiveIdle` 的第 4 参 `holderActivity` 连接器在 `@task-center/task`(`idle.ts`,`lastSessionActivity` 跳过 end-seed),面板(command-task)与看板(task-web)各自经 `ctx.sessions.get` 提供连接 —— 纯展示 join,不进 task-source(§10 归属段的修订)。
+**第一层·活跃度(零写入,展示侧连接,片 7a 已实现)**:闲置显示取 `max(台账 workedAt, 持有会话最后事件时间)` —— 持有会话在动 = 这条线没被搁下。不产生账本事件,不与模型自身的 task_update 撞版本号(CAS)。持有会话不在进程内(已死/未运行)时退回台账 workedAt。`session/end-seed` 是挂载时打的账面标记,不算活动 —— 从盘上恢复的会话不能因为被挂载就显得新鲜。落地归属:`effectiveIdle` 的第 4 参 `holderActivity` 连接器在 `dsh-task-center-task`(`idle.ts`,`lastSessionActivity` 跳过 end-seed),面板(command-task)与看板(task-web)各自经 `ctx.sessions.get` 提供连接 —— 纯展示 join,不进 task-source(§10 归属段的修订)。
 
 **第二层·上下文包增量(回合末一次写入,片 7b 已实现)**:持有会话每回合结束(`turn/end`,完成/中止/任何 reason 同待遇——证据与结局无关),本回合若有 **todo 差分**(勾选推进)或 goal 变化,自动追加一条 progress 进上下文包,actor 记为该持有会话(权限矩阵天然满足)。窗口 = 自上次结算 seq 之后到本回合 turn/end 的闭区间;todo 差分取"窗口前最后一表"对"窗口内最后一表"(窗口内没写 todo 即无差分);goal 变化逐事件渲染,clear 用更早快照报出目标名。行首 `自动回流` 前缀与模型自己的 task_update 汇报区分。纯闲聊回合不写 —— 包的每行都要有内容;沿既有字节上限截断。与模型自己的 task_update 撞 revision 时:同步侧读最新 revision 重试一次,再失败则丢弃(下回合差分自然补上,进度不丢)。结算标记在首个 await 前同步推进,背靠背回合不双结算;首次结算的种子只数**严格早于本次结算回合**的 turn/end——挂载后才结束的回合整回合回流(含挂载前尾巴,补上本进程错过的回流),纯历史回合永不回流。
 
@@ -133,7 +133,7 @@ headless 一次性会话在 `session/disposed` 时做最终一次第二层冲刷
 | 6e | 验收档(§5):foldUnverifiedCompletions(complete 后无人类消息)、acceptanceCreate 域动词(直接进待验收、reject 回 todo)、四门不对称(即时只读不生;闲置/处置/史扫生)、flags 表一次性迁移重读已覆盖地 ——✅ 2026-08-19 |
 | 6f | 打回回流(§5):`TaskChanged` 增携 mutation、reject 且验收 origin → pushRejection(恢复/复用来源会话、恢复 setup 按日志记录的预设加入名册组合、代领、user 消息送理由、一回合释放);fold 已回应序加提交回执;回合结算按会话串行成链、处置终读等链;`changes(taskId)` 账本历史读 + 开机对账重推未送达裁决 ——✅ 2026-08-19 | keyless:mutation 传递 1 测 + changes() 历史 1 测 + fold 提交回执 1 测 + 持久栈闭环 3 测(活打回→恢复会话被代领、按记录预设加入名册、理由达模型路由、注入先于消息、无幻影重提、无二胎任务;版本差打回→重启对账按账本理由重推;二次打回→保留持有者跳过重领、按记录预设重挂)+ 配额跳过改真断言(规范常量) | keyless:fold 纯函数 5 测(人类回应核实、edit/resume/clear 撤销、重完成再计、多 goal 排序)+ 闭环 4 测(闲置生、人回应不生、即时门不生、处置即生)+ 持久栈 3 测(落盘贪吃蛇零模型生待验收、未到门延迟跨启动补生、迁移恰生一次)+ 域动词 3 测 + 看板面 1 测 |
 
-插件包 `task-source`:水位跟踪、事件 fold、产候选;task-wake 同款 tick 模式(独立 timer,不混入巡检)。config:`pollSeconds`(扫描间隔)、`idleHours`(默认 3)、`agent`(总结会话路由)、`summariesPerTick`(每轮总结上限)、`transcriptEvents`(总结提示词携带的近 N 条消息)。覆盖标记(`task_source` storage domain)与史扫(可选 `sessionPersistence`)随组合出现:部署组合两者皆挂,最小组合退内存标记、跳过史扫。进度回流的归属按层拆:7a 是纯展示 join,住在 `@task-center/task`(`idle.ts`)+ 面板/看板两个消费方;7b/7c 产生账本事件,住 `task-source`。
+插件包 `task-source`:水位跟踪、事件 fold、产候选;task-wake 同款 tick 模式(独立 timer,不混入巡检)。config:`pollSeconds`(扫描间隔)、`idleHours`(默认 3)、`agent`(总结会话路由)、`summariesPerTick`(每轮总结上限)、`transcriptEvents`(总结提示词携带的近 N 条消息)。覆盖标记(`task_source` storage domain)与史扫(可选 `sessionPersistence`)随组合出现:部署组合两者皆挂,最小组合退内存标记、跳过史扫。进度回流的归属按层拆:7a 是纯展示 join,住在 `dsh-task-center-task`(`idle.ts`)+ 面板/看板两个消费方;7b/7c 产生账本事件,住 `task-source`。
 
 ## 11. 开放问题(定稿前定)
 

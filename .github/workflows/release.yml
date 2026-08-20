@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      # The tarballs must carry built dist/, and workspace:^ resolves to the
+      # tagged version at pack time.
+      - name: Build
+        run: pnpm run build
+      - name: Write npm auth
+        run: npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish
+        run: pnpm -r publish --access public --no-git-checks

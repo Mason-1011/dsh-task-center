@@ -4,7 +4,7 @@
  * a session claims a task, its request dies in `QUOTA` with a provider delay,
  * the guard parks (block → release → wake) before the loop sees the failure,
  * and task-wake fires a fresh session at the reset instant.
- * @module @task-center/task-quota/tests/quota
+ * @module dsh-task-center-task-quota/tests/quota
  */
 
 import { describe, expect, it } from 'vitest'
@@ -23,13 +23,13 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import { SchedBoardService } from '@task-center/task-sched'
+import { TaskService } from 'dsh-task-center-task'
+import { SchedBoardService } from 'dsh-task-center-task-sched'
 import { TaskQuotaService } from '../src/index.ts'
 import type { Config } from '../src/index.ts'
 import { decide, parkLine } from '../src/index.ts'
-import * as TaskWake from '@task-center/task-wake'
-import * as ToolTask from '@task-center/tool-task'
+import * as TaskWake from 'dsh-task-center-task-wake'
+import * as ToolTask from 'dsh-task-center-tool-task'
 
 const now = new Date('2026-08-17T12:00:00Z')
 

@@ -3,7 +3,7 @@
  * Loader): slash lines dispatch through the command registry and print their
  * result, unknown commands hint instead of reaching the model, `/exit`
  * terminates the loop, and the composition disposes with the context fiber.
- * @module @task-center/shell/tests/repl
+ * @module dsh-task-center-shell/tests/repl
  */
 
 import { afterAll, describe, expect, it } from 'vitest'

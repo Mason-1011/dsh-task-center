@@ -5,13 +5,13 @@
  * mutation and view semantics are re-derived by `fold` on load, which fails
  * loud on anything zod cannot see (illegal transition, revision gap, dangling
  * project reference).
- * @module @task-center/task-local/src/spec
+ * @module dsh-task-center-task-local/src/spec
  */
 
 import { z } from 'zod'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import type { CandidateDomainEvent, CandidateId, CandidateOperation, ProjectDomainEvent, ProjectId, TaskDomainEvent, TaskEventId, TaskId, TaskOperation } from '@task-center/task'
+import type { CandidateDomainEvent, CandidateId, CandidateOperation, ProjectDomainEvent, ProjectId, TaskDomainEvent, TaskEventId, TaskId, TaskOperation } from 'dsh-task-center-task'
 
 /** TaskId schema at the durable boundary; branding has no runtime representation. */
 const taskId = z.string().transform(value => value as TaskId)

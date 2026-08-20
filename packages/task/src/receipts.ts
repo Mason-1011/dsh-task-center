@@ -15,7 +15,7 @@
  * registration already covers for reads inside a process that loaded this
  * package.
  *
- * @module @task-center/task/receipts
+ * @module dsh-task-center-task/receipts
  */
 
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'

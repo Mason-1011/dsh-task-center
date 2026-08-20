@@ -6,7 +6,7 @@
  * failure path settling `failed` with a note, and over the durable medium:
  * rows survive a remount and a boot hands crash-stuck `firing` rows back to
  * pending.
- * @module @task-center/task-sched/tests/sched
+ * @module dsh-task-center-task-sched/tests/sched
  */
 
 import { describe, expect, it } from 'vitest'

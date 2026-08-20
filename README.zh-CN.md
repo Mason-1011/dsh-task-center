@@ -62,7 +62,7 @@ dsh-task-center 把任务做成**宿主外的一族插件**,同一份任务账�
 
 ```
 docs/design/   设计档案(产品定义、数据模型、接缝规格、计划、抽取层)
-packages/      @task-center/* 插件包(pnpm workspace)
+packages/      dsh-task-center-* 插件包(pnpm workspace)
 ```
 
 ## 安装
@@ -111,15 +111,15 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
         backend: json
         routes: {}
     - id: tasks
-      name: '@task-center/task'
+      name: 'dsh-task-center-task'
       config:
         contextPackByteLimit: 2000
         listDefaultLimit: 20
     - id: task-local
-      name: '@task-center/task-local'
+      name: 'dsh-task-center-task-local'
       config: {}
     - id: task-source
-      name: '@task-center/task-source'
+      name: 'dsh-task-center-task-source'
       config:
         pollSeconds: 30
         idleHours: 3
@@ -129,14 +129,14 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
         summariesPerTick: 2
         transcriptEvents: 40
     - id: tool-task
-      name: '@task-center/tool-task'
+      name: 'dsh-task-center-tool-task'
       config: {}
     - id: command-task
-      name: '@task-center/command-task'
+      name: 'dsh-task-center-command-task'
       config:
         staleDays: 3
     - id: task-wake
-      name: '@task-center/task-wake'
+      name: 'dsh-task-center-task-wake'
       config:
         pollSeconds: 30
         agent:
@@ -145,10 +145,10 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
         patrol:
           at: '09:30'
     - id: task-quota
-      name: '@task-center/task-quota'
+      name: 'dsh-task-center-task-quota'
       config: {}
     - id: task-reaper
-      name: '@task-center/task-reaper'
+      name: 'dsh-task-center-task-reaper'
       config: {}
 ```
 
@@ -192,11 +192,11 @@ web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
 
 ```yaml
     - id: task-web
-      name: '@task-center/task-web'
+      name: 'dsh-task-center-task-web'
       config:
         staleDays: 3
     - id: task-sched
-      name: '@task-center/task-sched'
+      name: 'dsh-task-center-task-sched'
       config:
         pollSeconds: 30
         agent:

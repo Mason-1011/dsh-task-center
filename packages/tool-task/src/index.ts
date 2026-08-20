@@ -1,7 +1,7 @@
 /**
  * `tool-task`: the model face of the task seam. Registers the seven task tools
  * and one system-prompt discipline section, globally like tool-goal.
- * @module @task-center/tool-task
+ * @module dsh-task-center-tool-task
  */
 
 import type { Context } from '@deepseek-ai/cordis'

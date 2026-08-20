@@ -6,7 +6,7 @@
  * submits; the human approves. The parent stays held by A throughout: two
  * sessions hold two different tasks at once, and the parent-side aggregation
  * reads the child's live state. Self-skips without DEEPSEEK_API_KEY.
- * @module @task-center/tool-task/tests/delegate-e2e
+ * @module dsh-task-center-tool-task/tests/delegate-e2e
  */
 
 import { afterAll, describe, expect, it } from 'vitest'
@@ -24,8 +24,8 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import * as TaskLocal from '@task-center/task-local'
+import { TaskService } from 'dsh-task-center-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
 import * as ToolTask from '../src/index.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'task-delegate-'))

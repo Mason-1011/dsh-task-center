@@ -3,7 +3,7 @@
  * actual Loader + Include path (workspace sources supplied via the loader's
  * import hook, per the harness's loader-composition test shape) — never a
  * hand-assembled ctx.plugin chain.
- * @module @task-center/shell/tests/boot
+ * @module dsh-task-center-shell/tests/boot
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -23,15 +23,15 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import { TaskService } from '@task-center/task'
-import * as TaskLocal from '@task-center/task-local'
-import * as TaskQuota from '@task-center/task-quota'
-import * as TaskReaper from '@task-center/task-reaper'
-import * as TaskSource from '@task-center/task-source'
-import * as TaskWake from '@task-center/task-wake'
-import TaskWeb from '@task-center/task-web'
-import * as ToolTask from '@task-center/tool-task'
-import * as CommandTask from '@task-center/command-task'
+import { TaskService } from 'dsh-task-center-task'
+import * as TaskLocal from 'dsh-task-center-task-local'
+import * as TaskQuota from 'dsh-task-center-task-quota'
+import * as TaskReaper from 'dsh-task-center-task-reaper'
+import * as TaskSource from 'dsh-task-center-task-source'
+import * as TaskWake from 'dsh-task-center-task-wake'
+import TaskWeb from 'dsh-task-center-task-web'
+import * as ToolTask from 'dsh-task-center-tool-task'
+import * as CommandTask from 'dsh-task-center-command-task'
 import * as Shell from '../src/index.ts'
 
 const yml = resolve(dirname(fileURLToPath(import.meta.url)), '../cordis.yml')
@@ -49,16 +49,16 @@ const modules = new Map<string, unknown>([
   ['@deepseek-ai/dsh-storage', Storage],
   ['@deepseek-ai/dsh-storage-json', StorageJson],
   ['@deepseek-ai/dsh-storage-domain', StorageDomain],
-  ['@task-center/task', TaskService],
-  ['@task-center/task-local', TaskLocal],
-  ['@task-center/task-source', TaskSource],
-  ['@task-center/tool-task', ToolTask],
-  ['@task-center/command-task', CommandTask],
-  ['@task-center/task-wake', TaskWake],
-  ['@task-center/task-quota', TaskQuota],
-  ['@task-center/task-reaper', TaskReaper],
-  ['@task-center/task-web', TaskWeb],
-  ['@task-center/shell', Shell],
+  ['dsh-task-center-task', TaskService],
+  ['dsh-task-center-task-local', TaskLocal],
+  ['dsh-task-center-task-source', TaskSource],
+  ['dsh-task-center-tool-task', ToolTask],
+  ['dsh-task-center-command-task', CommandTask],
+  ['dsh-task-center-task-wake', TaskWake],
+  ['dsh-task-center-task-quota', TaskQuota],
+  ['dsh-task-center-task-reaper', TaskReaper],
+  ['dsh-task-center-task-web', TaskWeb],
+  ['dsh-task-center-shell', Shell],
 ])
 
 /**

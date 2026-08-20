@@ -3,7 +3,7 @@
  * Providers are already normalized — dsh-llm adapters classify exhaustion as
  * the provider-neutral `QUOTA` code and retain the provider-requested delay —
  * so this module only decides what the task seam should do with that signal.
- * @module @task-center/task-quota/signal
+ * @module dsh-task-center-task-quota/signal
  */
 
 import { QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'

@@ -1,17 +1,35 @@
 {
-  "name": "@task-center/task-local",
+  "name": "dsh-task-center-task-local",
+  "version": "0.1.0",
+  "description": "Durable task-ledger store over the dsh storage domain.",
   "license": "MIT",
-  "version": "0.0.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mason-1011/dsh-task-center.git",
+    "directory": "packages/task-local"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tasks",
+    "storage"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-session": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-storage-domain": "^0.1.0-rc.8",
-    "@task-center/task": "workspace:*",
+    "dsh-task-center-task": "workspace:*",
     "zod": "^4.4.3",
     "@deepseek-ai/dsh-storage": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-storage-json": "^0.1.0-rc.8"
@@ -20,7 +38,7 @@
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-session": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-storage-domain": "^0.1.0-rc.8",
-    "@task-center/task": "workspace:*",
+    "dsh-task-center-task": "workspace:^",
     "zod": "^4.4.3",
     "@deepseek-ai/dsh-storage": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-storage-json": "^0.1.0-rc.8"

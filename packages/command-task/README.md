@@ -1,4 +1,4 @@
-# @task-center/command-task
+# dsh-task-center-command-task
 
 **用途一句话**:任务接缝的人类面——一条 `/task` 斜杠命令(项目分组并标闲置天数的面板 / 详情 / 建任务 / 定时唤醒 / 验收 / 打回 / 候选看管)加 `/task project` 项目管理,approve、reject、候选晋升/忽略与项目的建改归档只在这里合法。
 

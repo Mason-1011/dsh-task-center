@@ -31,7 +31,7 @@
  * already covered, so a restart re-reads no covered ground and re-pays no
  * summarizer run.
  * Spec: docs/design/06-extraction.md §4–§8.
- * @module @task-center/task-source
+ * @module dsh-task-center-task-source
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -50,7 +50,7 @@ import type { Session, SessionEvent, TodoItem, UserMessage } from '@deepseek-ai/
 // build program; the sweep reads it optionally through `ctx.get`.
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 // Type-only: carries the `tasks` service augmentation into the build program.
-import type { TaskActor, TaskId } from '@task-center/task'
+import type { TaskActor, TaskId } from 'dsh-task-center-task'
 import { memoryMarks, openMarks } from './marks.ts'
 import type { Marks } from './marks.ts'
 
@@ -252,7 +252,7 @@ const MACHINERY_PREFIXES = ['summary-', 'wake-', 'patrol-'] as const
 /**
  * Whether one session id names machinery rather than a human conversation:
  * the summarizer's own sessions (`summary-`, minted here) and task-wake's
- * fired and patrol sessions (`wake-`/`patrol-`, minted by `@task-center/task-wake`).
+ * fired and patrol sessions (`wake-`/`patrol-`, minted by `dsh-task-center-task-wake`).
  * Their transcripts are prompts this family wrote — extracting candidates
  * from them would feed the extractor its own output, and the work they did
  * already reaches the ledger through reflow and patrol notes.

@@ -6,12 +6,12 @@
  * cancel on every unsettled row. The field stays hidden when the sched
  * plugin is absent (its RPC channel is not installed) or the task has no
  * session to target.
- * @module @task-center/task-web/client/SchedField
+ * @module dsh-task-center-task-web/client/SchedField
  */
 
 import { useEffect, useState } from 'react'
 import { Button, IconChevronDownOutline14, Input } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { SchedCancelResult, SchedCreateResult, SchedListResult, SchedSend } from '@task-center/task-sched'
+import type { SchedCancelResult, SchedCreateResult, SchedListResult, SchedSend } from 'dsh-task-center-task-sched'
 import type { ConnectionService } from './context.ts'
 import { callApi } from './api.ts'
 import { localWhen, nextMorning9, toLocalInput } from './time.ts'

@@ -5,7 +5,7 @@
  * and creation. Every action runs as the human actor through compare-and-set,
  * exactly like `/task`; domain errors cross the wire as `{ok:false,code}`
  * envelopes instead of throwing.
- * @module @task-center/task-web
+ * @module dsh-task-center-task-web
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -13,8 +13,8 @@ import type { Context } from '@deepseek-ai/cordis'
 // build program; the promote stamp reads it optionally through `ctx.get`.
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { CandidateId, ProjectId, TaskId, describeWake, effectiveIdle, historySessionIds, lastSessionActivity, nextWakeAt } from '@task-center/task'
-import type { HolderActivity, TaskMutation, TaskView } from '@task-center/task'
+import { CandidateId, ProjectId, TaskId, describeWake, effectiveIdle, historySessionIds, lastSessionActivity, nextWakeAt } from 'dsh-task-center-task'
+import type { HolderActivity, TaskMutation, TaskView } from 'dsh-task-center-task'
 import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, SessionOption, SessionsResult, ShowResult, TaskCard } from './wire.ts'
 
 export type * from './wire.ts'

@@ -1,4 +1,4 @@
-# @task-center/task-sched
+# dsh-task-center-task-sched
 
 **用途一句话**:定时发送——人定好时间与内容(默认 `cont`),到点把这条消息作为用户输入送进目标会话,让挂着的任务到点自己续上。
 

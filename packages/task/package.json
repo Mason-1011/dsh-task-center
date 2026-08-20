@@ -1,12 +1,30 @@
 {
-  "name": "@task-center/task",
+  "name": "dsh-task-center-task",
+  "version": "0.1.0",
+  "description": "Task ledger seam for DeepSeek Harness: tasks, projects, and candidates over an append-only event stream.",
   "license": "MIT",
-  "version": "0.0.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mason-1011/dsh-task-center.git",
+    "directory": "packages/task"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tasks",
+    "kanban"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "type": "module",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-brand": "^0.1.0-rc.8",

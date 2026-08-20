@@ -2,7 +2,7 @@
  * Keyless tool tests over the real dsh tool registry and the real task seam:
  * the full model lifecycle through the five tools, the dual-ledger receipts,
  * the closed error union, and registration disposal.
- * @module @task-center/tool-task/tests/tools
+ * @module dsh-task-center-tool-task/tests/tools
  */
 
 import { describe, expect, it } from 'vitest'
@@ -12,8 +12,8 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { TaskService } from '@task-center/task'
-import { TaskId } from '@task-center/task'
+import { TaskService } from 'dsh-task-center-task'
+import { TaskId } from 'dsh-task-center-task'
 import * as ToolTask from '../src/index.ts'
 import type { TaskToolError, TaskToolListValue, TaskToolProjectListValue, TaskToolTask, TaskToolValue } from '../src/index.ts'
 

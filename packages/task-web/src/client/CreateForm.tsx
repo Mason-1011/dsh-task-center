@@ -3,7 +3,7 @@
  * project dropdown (无项目 default; native select in the Input idiom — the
  * primitives ship no Select). Domain rejections (empty fields, archived
  * project) render inline.
- * @module @task-center/task-web/client/CreateForm
+ * @module dsh-task-center-task-web/client/CreateForm
  */
 
 import { useState } from 'react'

@@ -8,12 +8,12 @@
  * silently never fire. Hidden while task-quota's channel cannot be read
  * (plugin absent or the fetch failed); the board's quota modal stays the
  * other, global entry.
- * @module @task-center/task-sched/client/QuotaResumeField
+ * @module dsh-task-center-task-sched/client/QuotaResumeField
  */
 
 import { useEffect, useState } from 'react'
 import { Pill } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { QuotaGetResult, QuotaSetResult, QuotaTargetSetResult } from '@task-center/task-quota'
+import type { QuotaGetResult, QuotaSetResult, QuotaTargetSetResult } from 'dsh-task-center-task-quota'
 import type { ConnectionService } from './context.ts'
 import { callSched } from './api.ts'
 
