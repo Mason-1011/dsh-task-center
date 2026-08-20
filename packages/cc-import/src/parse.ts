@@ -8,7 +8,9 @@
 
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { basename, isAbsolute } from 'node:path'
+import { basename } from 'node:path'
+import { isAbsolute as isPosixAbsolute } from 'node:path/posix'
+import { isAbsolute as isWindowsAbsolute } from 'node:path/win32'
 
 /** Prompt-text prefixes the CC harness synthesizes — never a person typing. */
 const SYNTHETIC_PROMPT_PREFIXES = [
@@ -168,8 +170,11 @@ export async function parseCcSession(file: string): Promise<CcSession> {
     if (!Number.isNaN(time) && createdAt === undefined) createdAt = stamped
     lastTime = stamped
     if ((line.type === 'user' || line.type === 'assistant') && typeof line.cwd === 'string' && cwd === undefined) {
-      cwd = isAbsolute(line.cwd) ? line.cwd : undefined
-      if (!isAbsolute(line.cwd)) warnings.push(`non-absolute cwd ${line.cwd} ignored`)
+      // Transcripts sync across OSes: a Windows drive path is absolute where it
+      // was recorded even though the host posix path module says otherwise.
+      const absolute = isWindowsAbsolute(line.cwd) || isPosixAbsolute(line.cwd)
+      cwd = absolute ? line.cwd : undefined
+      if (!absolute) warnings.push(`non-absolute cwd ${line.cwd} ignored`)
     }
     if (line.type !== 'user' && line.type !== 'assistant') {
       dropped++
