@@ -37,6 +37,9 @@
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
     "@task-center/task": "workspace:*",
     "@task-center/task-local": "workspace:*",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@deepseek-ai/dsh-permission-presets": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-approval": "^0.1.0-rc.8"
   }
 }

@@ -21,6 +21,11 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { SessionId, SessionStore } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+// Type-only: carries the permission/sandbox/approval event declarations into
+// this compilation so the idle-anchor test can write importer-style trailers.
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from '@deepseek-ai/dsh-user-approval'
 import type { TaskView } from '@task-center/task'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -411,6 +416,35 @@ describe('fresh-install history sweep', () => {
     await until(() => reviews(second.ctx).length === 1)
     await new Promise(resolve => setTimeout(resolve, 200))
     await shutdown(second.fibers)
+  })
+
+  it('anchors the idle clock to conversation: trailing bookkeeping does not reset it', { timeout: 8_000 }, async () => {
+    const sessionsRoot = await mkdtemp(join(tmpdir(), 'task-source-sessions-'))
+    const marksRoot = await mkdtemp(join(tmpdir(), 'task-source-marks-'))
+    roots.push(sessionsRoot, marksRoot)
+    const author = await bootAuthor(sessionsRoot)
+    // A session imported from another tool: the dialogue ended one idle
+    // window ago, but the importer's permission/sandbox/approval records
+    // trail the log at import time. The idle gate must anchor to the last
+    // conversational event, so the acceptance birth happens at this boot
+    // instead of one idle window after the import.
+    const now = Date.now()
+    await storeSession(author, 's-import', renumber([
+      ...snakeEvents(now),
+      eventOf('permission/preset', { preset: 'workspace-write' }, now),
+      eventOf('sandbox/mode', { mode: 'workspace-write' }, now),
+      eventOf('approval/policy', { policy: 'ask' }, now),
+    ]))
+    await shutdown(author.fibers)
+
+    const extractor = await bootExtractor(sessionsRoot, marksRoot)
+    const adapter = new VerdictAdapter(TASK_VERDICT)
+    extractor.ctx.llm.registerAdapter(['unused'], adapter)
+    await extractor.ctx.plugin(TaskSource, sourceConfig('unused', { idleHours: 1 }))
+    await until(() => reviews(extractor.ctx).length === 1)
+    expect(adapter.inputs).toHaveLength(0)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await shutdown(extractor.fibers)
   })
 
   it('re-reads ground covered before the acceptance tier existed, birthing exactly once', { timeout: 8_000 }, async () => {

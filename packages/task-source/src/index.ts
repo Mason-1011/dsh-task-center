@@ -1037,10 +1037,28 @@ interface Watermark {
 }
 
 /**
- * The last real event of one log: seq -1 and `now` for an empty log. The
- * `session/end-seed` marker is store bookkeeping stamped at attach time, not
- * session activity — skipping it anchors the idle clock to the last durable
- * event, so a session restored from disk can already be idle at boot.
+ * Event kinds that record store or policy bookkeeping rather than
+ * conversation: the attach-time end seed, an importer's provenance marker,
+ * and the permission/sandbox/approval records a fresh or imported session
+ * writes before or after any dialogue. They never carry the human's side of
+ * a conversation, so anchoring the idle clock to them would reset a
+ * long-finished conversation's clock to the moment a store or importer
+ * touched it.
+ */
+const NON_ACTIVITY_EVENTS = new Set([
+  'session/end-seed',
+  'session/imported',
+  'permission/preset',
+  'sandbox/mode',
+  'approval/policy',
+])
+
+/**
+ * The last real event of one log: seq -1 and `now` for an empty log.
+ * Bookkeeping kinds (see {@link NON_ACTIVITY_EVENTS}) are skipped, so the
+ * idle clock anchors to the last durable conversational event — a session
+ * restored from disk, or one imported from another tool with its original
+ * timestamps, can already be idle at boot.
  * @param events - the complete log, in seq order.
  * @returns the last activity's seq and epoch-ms time.
  */
@@ -1048,7 +1066,7 @@ function lastActivity(events: readonly SessionEvent[]): { seq: number; time: num
   let seq = -1
   let time = Number.NaN
   for (const event of events) {
-    if (event.type === 'session/end-seed') continue
+    if (NON_ACTIVITY_EVENTS.has(event.type)) continue
     seq = event.seq
     time = event.time
   }
