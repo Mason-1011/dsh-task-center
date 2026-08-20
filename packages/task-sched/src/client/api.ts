@@ -10,16 +10,19 @@ import type { SchedError } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 
 /**
- * One typed call into the `task-sched` namespace over the /api channel.
+ * One typed call into a plugin namespace over the /api channel.
  * @param connection - the client connection service.
  * @param method - endpoint method, e.g. `schedList` / `schedCreate`.
  * @param args - business arguments; undefined-valued keys are stripped.
+ * @param namespace - the remote service's namespace; `task-sched` unless the
+ *   call crosses into a sibling plugin's channel (the quota field's).
  * @returns the host method's return value, or one folded error envelope.
  */
 export async function callSched<T>(
   connection: ConnectionService,
   method: string,
   args: Readonly<Record<string, unknown>>,
+  namespace = 'task-sched',
 ): Promise<T | SchedError> {
   const clean: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(args)) {
@@ -27,7 +30,7 @@ export async function callSched<T>(
   }
   let envelope
   try {
-    envelope = await connection.rpc.call('/api', `task-sched/${method}`, { args: clean })
+    envelope = await connection.rpc.call('/api', `${namespace}/${method}`, { args: clean })
   } catch (cause) {
     return { ok: false, code: 'SCHED_TRANSPORT', message: String(cause) }
   }

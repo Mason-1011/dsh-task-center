@@ -320,6 +320,9 @@ importers:
       '@task-center/task':
         specifier: workspace:*
         version: link:../task
+      '@task-center/task-quota':
+        specifier: workspace:*
+        version: link:../task-quota
       '@task-center/task-source':
         specifier: workspace:*
         version: link:../task-source

@@ -13,6 +13,7 @@ import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SchedSend } from '../wire.ts'
 import type { ConnectionService } from './context.ts'
 import { ClockOutline14 } from './icons.tsx'
+import { QuotaResumeField } from './QuotaResumeField.tsx'
 import { schedStore, useSched } from './store.ts'
 import { localWhen, nextMorning9, toLocalInput } from './time.ts'
 
@@ -101,6 +102,7 @@ export function SchedModal(props: { connection: ConnectionService; sessionId: st
             ))}
           </span>
         </div>
+        <QuotaResumeField connection={props.connection} sessionId={props.sessionId} />
         {error !== undefined && <div className="task-sched-error">{error}</div>}
         {mine.length > 0 && (
           <div className="task-sched-field">
