@@ -71,34 +71,15 @@ packages/      dsh-task-center-* 插件包(pnpm workspace)
 
 要求 dsh ≥ 0.1.0-rc.8。前置:已全局安装 [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh)(`npm i -g @deepseek-ai/dsh`),且 `dsh plugin` 能找到 `pnpm`(corepack 用户:`corepack enable`;若 node 目录无写权限,`corepack enable --install-directory <目录>` 后把该目录挂上 PATH)。
 
-从 npm 装一个包即可 —— 全部插件打进同一个包,自带默认配置行,不用克隆、不用构建:
+克隆、构建、装入唯一的 bundle 包(不依赖 npm;npm 包正在上架中,上架后文末的一条命令即可取代以下全部):
 
 ```sh
-dsh plugin --profile web add dsh-task-center
+git clone https://github.com/Mason-1011/dsh-task-center && cd dsh-task-center
+corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist + packages/bundle/dist
+dsh plugin --profile web add "file:$(pwd)/packages/bundle"
 ```
 
 `web` profile(首次 `dsh web` 自动创建)自带本套件需要的 storage 三行,共用 `~/.dsh/storages` 账本根;本包不重插这三行,不存在 storage 重复装两份的问题。新建的非 web profile 需先自行补上 storage 三行([片段](packages/bundle/README.md));缺了它们启动会大声报错,不会静默出错。每个插件行都带部署默认值;在 profile 自己的 `cordis.patch.yml` 里按 `id` 覆盖任意行(后层整段替换 `config`)。
-
-0.1.0 的多包家族(`dsh-task-center-task` 等)已弃用,由 `dsh-task-center` 一个包全部取代。
-
-然后设好 `DEEPSEEK_API_KEY`(或在 web 的 Models 页保存)即可:
-
-```sh
-dsh web                          # 浏览器 UI;侧栏底部出现任务看板入口
-dsh --profile web "某任务"        # 一次性:建 agent、干活、打印结果、退出
-```
-
-<details>
-<summary>从源码安装(开发用)</summary>
-
-构建工作区后装入唯一的 bundle 包(它把各插件包编译进自己的 `dist`):
-
-```sh
-corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist + packages/bundle/dist
-dsh plugin --profile web add file:./packages/bundle
-```
-
-插件行(及其默认值)来自 bundle 自带的层,即 [`packages/bundle/cordis.patch.yml`](packages/bundle/cordis.patch.yml);新建非 web profile 还需按包 README 里的片段补 storage 三行。
 
 不启动只检查组合树:
 
@@ -106,7 +87,18 @@ dsh plugin --profile web add file:./packages/bundle
 dsh --profile <name> --dump-config
 ```
 
-</details>
+0.1.0 的多包家族(`dsh-task-center-task` 等)已弃用,由 `dsh-task-center` 一个包全部取代。该包在 npm 上架后,免克隆的装法是一条命令:
+
+```sh
+dsh plugin --profile web add dsh-task-center
+```
+
+然后设好 `DEEPSEEK_API_KEY`(或在 web 的 Models 页保存)即可:
+
+```sh
+dsh web                          # 浏览器 UI;侧栏底部出现任务看板入口
+dsh --profile web "某任务"        # 一次性:建 agent、干活、打印结果、退出
+```
 
 ## 使用
 
