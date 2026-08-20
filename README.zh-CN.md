@@ -2,6 +2,13 @@
 
 **[English](README.md) | 简体中文**
 
+[![CI](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict%20%7C%20ESM-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](./package.json)
+[![DeepSeek Harness](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4C6EF5)](https://github.com/deepseek-ai/deepseek-harness)
+[![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-74C0FC?logo=github&logoColor=white)](https://github.com/topics/dsh-plugin)
+
 > 个人任务指挥中心:[dsh(DeepSeek Harness)](https://github.com/deepseek-ai/deepseek-harness) 的任务全生命周期插件族。
 > **人管一摊长期任务,agent 跨会话认领并推进,定时自己醒来干活,进度对人类永远可见。**
 
@@ -26,7 +33,7 @@ dsh-task-center 把任务做成**宿主外的一族插件**,同一份任务账�
 - **项目与工作区分组**——人类管理的项目 + 任务出生时自动盖戳的工作区目录,看板四类筛选(全部/项目/工作区/无分组);
 - **定时干活**——任务挂唤醒规则(一次/定点/周期),到点自动起新会话认领续干;每日巡检会话刷新全部未完结任务现状;看板详情与卡片直接展示已挂的唤醒规则与下次到点时间;
 - **定时发送**——会话页与看板详情均可定一条消息(内容默认 `cont`)与发送时间(附快捷片),到点自动作为用户输入送进目标会话,挂在半路的任务到点自己续上;
-- **额度感知**——API 额度用尽自动挂起并释放持有,额度重置点自动唤醒续做;看板头部的「自动续做 开/关」可随时切换并跨重启保留,配置里的 `resumeOnReset` 只是默认值;阻塞卡片标注阻塞原因类别(额度/人工等);
+- **额度感知**——API 额度用尽自动挂起并释放持有,额度重置点自动续做;看板头部的「自动续做」弹窗可随时开关,并像定时发送一样**指定续做会话**(默认新会话 / 撞墙的会话 / 任选一个会话,后两者走定时发送通道),选择跨重启保留,配置里的 `resumeOnReset` 只是默认值;阻塞卡片标注阻塞原因类别(额度/人工等);
 - **崩溃恢复**——持有任务的会话死亡(崩溃/被杀),自动释放持有,任务回到可认领;
 - **自动抽取**——闲置会话里的 goal/已批计划/todo 自动出生为候选,人确认晋升;做完却无人回应的 goal 直接进待验收;验收打回自动把理由推回原对话重做;
 - **双界面**——Web 全屏看板(五列、筛选、阻塞置顶、详情、新建)与 `/task` 命令面板读同一份账本。
@@ -179,7 +186,7 @@ dsh web                              # 浏览器 UI:任务工具进模型,/task 
 
 ### Web 看板(task-web)
 
-侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。头部操作行带额度「自动续做 开/关」开关(实时切换 task-quota 的运行时旋钮)。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务、上下文包尾部、定时唤醒规则与定时发送栏。阻塞卡片与详情标注阻塞原因类别(额度/人工等)。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
+侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。头部操作行带「自动续做」弹窗(开关 + 续做会话选择,task-quota 的运行时旋钮;指定会话的下拉列出运行中与历史会话)。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务、上下文包尾部、定时唤醒规则与定时发送栏。阻塞卡片与详情标注阻塞原因类别(额度/人工等)。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
 
 web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
 
@@ -210,7 +217,7 @@ web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
 | `staleDays` | command-task / task-web | 3 | 搁置告警阈值(天) |
 | `patrol.at` | task-wake | — | 每日巡检时刻(如 `'09:30'`;错过即跳过) |
 | `agent` | task-source / task-wake / task-sched | — | 唤醒/总结/定时发送会话的路由(provider + model) |
-| `resumeOnReset` | task-quota | true | 自动续做的默认值;看板头部开关在运行时切换(持久化在 task-quota 自己的存储域) |
+| `resumeOnReset` | task-quota | true | 自动续做的默认值;看板头部弹窗在运行时切换开关并选择续做会话(持久化在 task-quota 自己的存储域) |
 
 ## 开发
 

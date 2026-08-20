@@ -15,7 +15,7 @@ import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { CandidateId, ProjectId, TaskId, describeWake, effectiveIdle, historySessionIds, lastSessionActivity, nextWakeAt } from '@task-center/task'
 import type { HolderActivity, TaskMutation, TaskView } from '@task-center/task'
-import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, ShowResult, TaskCard } from './wire.ts'
+import type { ActResult, BoardPayload, CandidateCard, CreateResult, IgnoreResult, PromoteResult, SessionOption, SessionsResult, ShowResult, TaskCard } from './wire.ts'
 
 export type * from './wire.ts'
 
@@ -279,6 +279,38 @@ export class TaskBoardService extends TypertRemoteService {
     const ignored = await this.ctx.tasks.candidateIgnore(CandidateId(candidateId), expectedRevision, { kind: 'human' })
     if ('code' in ignored) return { ok: false, code: ignored.code, message: ignored.message }
     return { ok: true }
+  }
+
+  /**
+   * Every session a targeting picker can offer: live sessions first, then
+   * persisted headers, newest first. Feeds the quota resume-target picker;
+   * the same set the scheduled-send channel would accept as a target.
+   */
+  @Remote('sessions')
+  async sessions(): Promise<SessionsResult> {
+    const options = new Map<string, SessionOption>()
+    for (const session of this.ctx.sessions.list()) {
+      options.set(session.id, {
+        id: session.id,
+        createdAt: new Date(session.header.createdAt).toISOString(),
+        ...session.header.cwd === undefined ? {} : { cwd: session.header.cwd },
+        live: true,
+      })
+    }
+    const persistence: SessionPersistence | undefined = this.ctx.get('sessionPersistence')
+    if (persistence !== undefined) {
+      for (const header of await persistence.list()) {
+        if (options.has(header.id)) continue
+        options.set(header.id, {
+          id: header.id,
+          createdAt: new Date(header.createdAt).toISOString(),
+          ...header.cwd === undefined ? {} : { cwd: header.cwd },
+          live: false,
+        })
+      }
+    }
+    const sessions = [...options.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    return { ok: true, sessions }
   }
 }
 

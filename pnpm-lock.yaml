@@ -233,6 +233,12 @@ importers:
       '@task-center/task':
         specifier: workspace:*
         version: link:../task
+      '@task-center/task-sched':
+        specifier: workspace:*
+        version: link:../task-sched
+      '@task-center/task-source':
+        specifier: workspace:*
+        version: link:../task-source
       '@task-center/task-wake':
         specifier: workspace:*
         version: link:../task-wake

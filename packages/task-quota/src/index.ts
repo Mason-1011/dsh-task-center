@@ -11,7 +11,10 @@
  * at 挂起释放 and a human resumes. The knob defaults from the
  * `resumeOnReset` config and flips at runtime through the `task-quota/*`
  * remotes (the web board's head toggle), the last flip persisting in this
- * plugin's own storage domain.
+ * plugin's own storage domain. The continuation's target is likewise
+ * runtime-choosable: a fresh wake session (default), the session that hit
+ * the wall, or one named session — the latter two ride the scheduled-send
+ * channel at the reset instant, exactly like a human-scheduled `cont`.
  * @module @task-center/task-quota
  */
 
@@ -19,17 +22,21 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import type { GenerateOptions, LlmFailure, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { TaskActor, TaskView } from '@task-center/task'
+import { SessionId } from '@deepseek-ai/dsh-session'
+// Type-only: carries the `task-sched` service augmentation into the build
+// program; the reset-point send rides it when present, otherwise the wake
+// rule takes over.
+import type { SchedBoardService } from '@task-center/task-sched'
+import type { TaskActor, TaskRecord, TaskView } from '@task-center/task'
 import { decide, parkLine } from './signal.ts'
-import type { ParkDecision } from './signal.ts'
+import type { ParkDecision, ResumeTarget } from './signal.ts'
 import { memoryResume, openResume } from './state.ts'
 import type { ResumeStore } from './state.ts'
-import type { QuotaGetResult, QuotaSetResult } from './wire.ts'
+import type { QuotaGetResult, QuotaSetResult, QuotaTargetSetResult } from './wire.ts'
 
 export { decide, parkLine } from './signal.ts'
-export type { ParkDecision, QuotaDecision } from './signal.ts'
-export type { QuotaGetResult, QuotaSetResult } from './wire.ts'
+export type { ParkDecision, QuotaDecision, ResumeTarget } from './signal.ts'
+export type { QuotaGetResult, QuotaSetResult, QuotaTargetSetResult } from './wire.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -60,6 +67,19 @@ export interface Config {
 /** Terminal error finish facts of one stream, or undefined. */
 function terminalFailure(chunk: StreamChunk): LlmFailure | undefined {
   return chunk.type === 'finish' && chunk.reason.kind === 'error' ? chunk.reason.failure : undefined
+}
+
+/** The message the reset-point send delivers into the target session. */
+function resumeMessage(record: TaskRecord): string {
+  return [
+    '[task-quota] 额度已恢复,续做以下任务。',
+    `目标: ${record.objective}`,
+    `验收: ${record.acceptance}`,
+    `状态: ${record.status}`,
+    '上下文包(历次会话的累积记录):',
+    record.contextPack === '' ? '(尚无记录)' : record.contextPack,
+    '指令:先用 task_claim 认领该任务,然后完成它;以 task_report(outcome=review)提交,completion note 逐条对照验收标准。',
+  ].join('\n')
 }
 
 /**
@@ -100,10 +120,13 @@ export class TaskQuotaService extends TypertRemoteService {
   /** The board toggle's last flip; undefined while it has never been flipped. */
   private resumeOverride: boolean | undefined
 
+  /** The chosen resume target; undefined while never chosen (fresh default). */
+  private targetOverride: ResumeTarget | undefined
+
   /** The resume store; memory until `[Service.init]` swaps in the durable one. */
   private store: ResumeStore = memoryResume()
 
-  /** Open the durable resume store and prime the override from it. */
+  /** Open the durable resume store and prime the overrides from it. */
   async [Service.init](): Promise<void> {
     const facility = this.ctx.get('storageDomain')
     if (facility === undefined) {
@@ -113,12 +136,18 @@ export class TaskQuotaService extends TypertRemoteService {
     const opened = await openResume(facility)
     this.store = opened.resume
     this.resumeOverride = opened.resume.override()
+    this.targetOverride = opened.resume.target()
     this.ctx.effect(() => () => void opened.close())
   }
 
   /** The effective resume knob: the toggle's last flip, else the config default. */
   getResume(): boolean {
     return this.resumeOverride ?? this.resumeDefault
+  }
+
+  /** The effective resume target: the chosen one, else a fresh wake session. */
+  getTarget(): ResumeTarget {
+    return this.targetOverride ?? { kind: 'fresh' }
   }
 
   /** Park every task the dying session holds: block → release → wake. */
@@ -130,17 +159,13 @@ export class TaskQuotaService extends TypertRemoteService {
       try {
         const blocked = await this.ctx.tasks.mutate(view.record.id, view.record.revision, {
           operation: 'block',
-          reason: { code: 'quota', message: parkLine(decision, this.getResume()) },
+          reason: { code: 'quota', message: parkLine(decision, this.getResume(), this.getTarget()) },
         }, actor)
         if ('code' in blocked) throw new Error(blocked.code)
         const released = await this.ctx.tasks.mutate(view.record.id, blocked.record.revision, { operation: 'release' }, actor)
         if ('code' in released) throw new Error(released.code)
         if (decision.kind === 'park' && this.getResume()) {
-          const woken = await this.ctx.tasks.mutate(view.record.id, released.record.revision, {
-            operation: 'wake-set',
-            rule: { kind: 'at', scheduledAt: decision.resetAt },
-          }, actor)
-          if ('code' in woken) throw new Error(woken.code)
+          await this.armResume(released, sessionId, decision)
         }
         this.ctx.logger('task-quota').info('parked task at quota wall', { taskId: view.record.id, status: released.record.status })
       } catch (error) {
@@ -150,10 +175,46 @@ export class TaskQuotaService extends TypertRemoteService {
     }
   }
 
-  /** The effective resume knob, for the board head toggle. */
+  /**
+   * Arm the reset-point continuation of one parked task. `fresh` (and any
+   * refusal or missing sched channel) lands on the one-shot wake rule the
+   * same way; `origin`/`session` ride the scheduled-send channel at the reset
+   * instant, exactly like a human-scheduled `cont`.
+   */
+  private async armResume(released: TaskView, sessionId: SessionId, decision: Extract<ParkDecision, { kind: 'park' }>): Promise<void> {
+    const target = this.getTarget()
+    if (target.kind !== 'fresh') {
+      const sched: SchedBoardService | undefined = this.ctx.get('task-sched')
+      const targetSession = target.kind === 'origin' ? sessionId : SessionId(target.sessionId)
+      if (sched !== undefined) {
+        const armed = await sched.schedCreate(targetSession, resumeMessage(released.record), decision.resetAt)
+        if (armed.ok) {
+          this.ctx.logger('task-quota').info('resume send armed', { taskId: released.record.id, session: targetSession, at: decision.resetAt })
+          return
+        }
+        // The send channel refused (unknown session, time already past); the wake rule is the fallback.
+        this.ctx.logger('task-quota').warn('resume send refused, falling back to fresh wake', { taskId: released.record.id, code: armed.code })
+      } else {
+        this.ctx.logger('task-quota').warn('no task-sched mounted, falling back to fresh wake', { taskId: released.record.id })
+      }
+    }
+    const woken = await this.ctx.tasks.mutate(released.record.id, released.record.revision, {
+      operation: 'wake-set',
+      rule: { kind: 'at', scheduledAt: decision.resetAt },
+    }, { kind: 'model', sessionId })
+    if ('code' in woken) throw new Error(woken.code)
+  }
+
+  /** The effective knob and target, for the board head toggle. */
   @Remote('quotaGet')
   quotaGet(): QuotaGetResult {
-    return { ok: true, resume: this.getResume() }
+    const target = this.getTarget()
+    return {
+      ok: true,
+      resume: this.getResume(),
+      target: target.kind,
+      ...target.kind === 'session' ? { session: target.sessionId } : {},
+    }
   }
 
   /**
@@ -171,6 +232,32 @@ export class TaskQuotaService extends TypertRemoteService {
     this.resumeOverride = value
     this.ctx.logger('task-quota').info('resume knob set', { value })
     return { ok: true, resume: this.getResume() }
+  }
+
+  /**
+   * Choose where the armed continuation goes; the choice persists across
+   * restarts and takes effect at the next quota wall.
+   * @param target - `fresh` (a new wake session), `origin` (the session that
+   *   hit the wall), or `session` (one named session).
+   * @param sessionId - the named session's id; required only for `session`.
+   *   (Named `sessionId`, not `session`: the SRC gateway reads a bare `session`
+   *   parameter as a required SessionId lookup.)
+   */
+  @Remote('quotaTargetSet')
+  async quotaTargetSet(target: string, sessionId: string | undefined): Promise<QuotaTargetSetResult> {
+    if (target !== 'fresh' && target !== 'origin' && target !== 'session') {
+      return { ok: false, code: 'QUOTA_INVALID_TARGET', message: 'target 必须是 fresh / origin / session' }
+    }
+    const chosen: ResumeTarget = target === 'session'
+      ? { kind: 'session', sessionId: (sessionId ?? '').trim() }
+      : { kind: target }
+    if (chosen.kind === 'session' && chosen.sessionId === '') {
+      return { ok: false, code: 'QUOTA_INVALID_SESSION', message: '指定会话时 session 不能为空' }
+    }
+    await this.store.setTarget(chosen)
+    this.targetOverride = chosen
+    this.ctx.logger('task-quota').info('resume target set', { target: chosen.kind, ...chosen.kind === 'session' ? { session: chosen.sessionId } : {} })
+    return { ok: true, target: chosen.kind, ...chosen.kind === 'session' ? { session: chosen.sessionId } : {} }
   }
 }
 

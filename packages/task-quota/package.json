@@ -30,6 +30,8 @@
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.8",
     "@task-center/task": "workspace:*",
+    "@task-center/task-sched": "workspace:*",
+    "@task-center/task-source": "workspace:*",
     "@task-center/task-wake": "workspace:*",
     "@task-center/tool-task": "workspace:*",
     "zod": "^4.4.3"

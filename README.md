@@ -2,6 +2,13 @@
 
 **English | [简体中文](README.zh-CN.md)**
 
+[![CI](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-1011/dsh-task-center/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict%20%7C%20ESM-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](./package.json)
+[![DeepSeek Harness](https://img.shields.io/badge/powered%20by-DeepSeek%20Harness-4C6EF5)](https://github.com/deepseek-ai/deepseek-harness)
+[![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-74C0FC?logo=github&logoColor=white)](https://github.com/topics/dsh-plugin)
+
 > A personal task command center for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — a full task-lifecycle plugin suite.
 > **You steer a long-lived backlog; agents claim tasks across sessions, wake themselves up on schedule to keep working, and progress stays visible to you at all times.**
 
@@ -28,7 +35,7 @@ It is implemented independently of the harness repo and depends only on its publ
 - **Projects and workspaces** — human-managed projects plus a workspace directory stamped at task birth; the board filters four ways (all / project / workspace / ungrouped).
 - **Scheduled work** — a task can carry wake rules (one-shot / at-time / recurring); when the time comes, a fresh session is spawned, claims the task, and continues. A daily patrol session refreshes the state of every open task. Wake rules and their next fire time render on cards and in the detail dialog.
 - **Scheduled sends** — from the session page or the board detail, schedule a message (default `cont`) to be delivered into an existing session at a set time, with quick presets — a task parked mid-flight picks itself up.
-- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they wake and resume. The kanban head toggle (自动续做 开/关) flips this at runtime and the flip survives restarts; `resumeOnReset` in config is only the default. Blocked cards label the reason category (quota / human / …).
+- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they resume automatically. The kanban head dialog (自动续做) flips this at runtime and picks **which session** continues — a fresh wake session (default), the session that hit the wall, or any named session (the latter two ride the scheduled-send channel); choices survive restarts, and `resumeOnReset` in config is only the default. Blocked cards label the reason category (quota / human / …).
 - **Crash recovery** — when a session holding a task dies (crash or kill), the hold is released automatically and the task becomes claimable again.
 - **Automatic extraction** — goals, approved plans, and todo tables left in idle sessions birth task candidates for you to confirm and promote; a goal completed with no human response goes straight to awaiting-review; a rejection pushes the reason back into the original conversation and re-claims it for rework.
 - **Two frontends** — a full-screen web kanban (five columns, filters, blocked pinned on top, detail dialog, creation) and a `/task` command panel, both reading the same ledger.
@@ -181,7 +188,7 @@ Acceptance verdicts (approve / reject), release, archive, block, project CRUD, c
 
 ### Web board (task-web)
 
-Open the full-screen five-column board (todo / in-progress / blocked / awaiting-review / done) from the sidebar footer, with the pending-candidates inbox. The head row carries the quota auto-resume toggle (自动续做 开/关, task-quota's runtime knob). Filters: all / project / workspace (birth directory) / ungrouped. The detail dialog shows acceptance criteria, past conversations (clickable through to the session page), subtasks, the context-pack tail, wake rules, and scheduled sends. Blocked cards and details label the reason category (quota / human / …). A ⚠ banner names the open task left untouched longest within `staleDays` (idle computed over the subtree, freshest wins; delegation in progress does not count as idle).
+Open the full-screen five-column board (todo / in-progress / blocked / awaiting-review / done) from the sidebar footer, with the pending-candidates inbox. The head row carries the quota auto-resume dialog (自动续做: on/off plus the resume-target session picker, task-quota's runtime knobs). Filters: all / project / workspace (birth directory) / ungrouped. The detail dialog shows acceptance criteria, past conversations (clickable through to the session page), subtasks, the context-pack tail, wake rules, and scheduled sends. Blocked cards and details label the reason category (quota / human / …). A ⚠ banner names the open task left untouched longest within `staleDays` (idle computed over the subtree, freshest wins; delegation in progress does not count as idle).
 
 Append to the web profile's `cordis.patch.yml` after the command-task row:
 
@@ -212,7 +219,7 @@ Append to the web profile's `cordis.patch.yml` after the command-task row:
 | `staleDays` | command-task / task-web | 3 | Stale-warning threshold in days |
 | `patrol.at` | task-wake | — | Daily patrol time (e.g. `'09:30'`; a missed slot is skipped) |
 | `agent` | task-source / task-wake / task-sched | — | Route (provider + model) for wake / summary / scheduled-send sessions |
-| `resumeOnReset` | task-quota | true | Default for the auto-resume knob; the board head toggle flips it at runtime (persisted in task-quota's own storage domain) |
+| `resumeOnReset` | task-quota | true | Default for the auto-resume knob; the board head dialog flips it — and picks the resume-target session — at runtime (persisted in task-quota's own storage domain) |
 
 ## Development
 

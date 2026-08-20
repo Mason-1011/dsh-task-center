@@ -62,6 +62,23 @@ export interface BoardPayload {
   readonly stalest?: TaskCard
 }
 
+/** One session a targeting picker can offer. */
+export interface SessionOption {
+  readonly id: string
+  /** ISO instant of session creation. */
+  readonly createdAt: string
+  /** Absolute working directory when the header recorded one. */
+  readonly cwd?: string
+  /** Whether the session is live in this process right now. */
+  readonly live: boolean
+}
+
+/** `sessions` outcome: every offerable session, newest first. */
+export interface SessionsResult {
+  readonly ok: true
+  readonly sessions: readonly SessionOption[]
+}
+
 /**
  * One extraction candidate card: work the source extractor found in an idle
  * session, waiting for the human verdict (晋升 with an acceptance, or 忽略).

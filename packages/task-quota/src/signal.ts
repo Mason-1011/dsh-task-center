@@ -52,15 +52,34 @@ export function decide(failure: LlmFailure, fallbackWindowSeconds: number | unde
 export type ParkDecision = Exclude<QuotaDecision, { kind: 'ignore' }>
 
 /**
+ * Where the reset-point continuation goes, when it goes anywhere: a fresh
+ * wake session (task-wake's), the session that hit the wall, or one named
+ * session — the latter two ride the scheduled-send channel at the reset
+ * instant.
+ */
+export type ResumeTarget =
+  | { readonly kind: 'fresh' }
+  | { readonly kind: 'origin' }
+  | { readonly kind: 'session'; readonly sessionId: string }
+
+/**
  * Human-readable pack line for one park, so the next session resumes from the
  * wall it hit.
  * @param decision - the executed park decision.
- * @param resumeOnReset - whether the guard set the reset-instant wake rule
- *   (the plugin's `resumeOnReset` knob; the line must say who continues).
+ * @param resumeOnReset - whether the guard armed any reset-point continuation
+ *   (the resume knob; the line must say who continues).
+ * @param target - where the armed continuation goes; defaults to a fresh
+ *   wake session.
  * @returns the pack line naming the wall, the expected reset, and the mover.
  */
-export function parkLine(decision: ParkDecision, resumeOnReset = true): string {
+export function parkLine(decision: ParkDecision, resumeOnReset = true, target: ResumeTarget = { kind: 'fresh' }): string {
   if (decision.kind === 'park-without-wake') return '额度用尽,平台未给出恢复时间;任务已释放,等人工设唤醒或换 key'
   const wall = `额度用尽(预计 ${decision.resetAt} 恢复${decision.from === 'fallback' ? ',按声明窗口推算' : ''});任务已释放`
-  return resumeOnReset ? `${wall},到点自动唤醒续做` : `${wall},自动续做已关闭,等人工唤醒`
+  if (!resumeOnReset) return `${wall},自动续做已关闭,等人工唤醒`
+  const mover = target.kind === 'origin'
+    ? '到点自动回原会话续做'
+    : target.kind === 'session'
+      ? `到点自动续做(发进会话 ${target.sessionId.slice(0, 8)})`
+      : '到点自动唤醒新会话续做'
+  return `${wall},${mover}`
 }

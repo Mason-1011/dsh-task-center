@@ -69,7 +69,7 @@ describe('task-web host', () => {
     expect(board).toBeDefined()
     expect(board.typertRemote.namespace).toBe('task-board')
     const markers = remoteMethods(board)
-    expect(markers.map(marker => marker.method).sort()).toEqual(['act', 'board', 'create', 'ignore', 'promote', 'show'])
+    expect(markers.map(marker => marker.method).sort()).toEqual(['act', 'board', 'create', 'ignore', 'promote', 'sessions', 'show'])
     for (const marker of markers) {
       expect(marker.invocation).toEqual({ kind: 'direct' })
       expect(marker.exportName).toBeUndefined()

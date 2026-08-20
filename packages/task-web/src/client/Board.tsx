@@ -30,6 +30,7 @@ import { CandidateCardView } from './CandidateCard.tsx'
 import { ClockOutline14 } from './icons.tsx'
 import { CreateForm } from './CreateForm.tsx'
 import { DetailPopover } from './DetailPopover.tsx'
+import { QuotaForm } from './QuotaForm.tsx'
 import { STATUS_DOT, STATUS_LABEL } from './status.ts'
 import { boardStore, useBoard } from './store.ts'
 import { ensureStyles } from './styles.ts'
@@ -113,7 +114,8 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [detailId, setDetailId] = useState<string | undefined>()
   const [creating, setCreating] = useState(false)
-  const [quotaResume, setQuotaResume] = useState<boolean | undefined>()
+  const [quota, setQuota] = useState<QuotaGetResult | undefined>()
+  const [quotaOpen, setQuotaOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // The resume knob rides its own namespace (task-quota owns the policy);
@@ -121,7 +123,7 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
   useEffect(() => {
     if (!state.open) return
     void callApi<QuotaGetResult>(props.connection, 'quotaGet', {}, 'task-quota').then(result => {
-      if (result.ok) setQuotaResume(result.resume)
+      if (result.ok) setQuota(result)
     })
   }, [state.open, props.connection])
 
@@ -130,11 +132,11 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
   useEffect(() => {
     if (!state.open) return
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && detailId === undefined && !creating) boardStore.closeBoard()
+      if (event.key === 'Escape' && detailId === undefined && !creating && !quotaOpen) boardStore.closeBoard()
     }
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('keydown', onKey) }
-  }, [state.open, detailId, creating])
+  }, [state.open, detailId, creating, quotaOpen])
 
   if (!state.open) return null
   const payload = state.payload
@@ -191,21 +193,15 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
           >
             刷新
           </Button>
-          {quotaResume !== undefined && (
+          {quota !== undefined && (
             <Button
               variant="ghost"
               size="sm"
               icon={<ClockOutline14 size={12} />}
-              title="额度重置后是否自动唤醒被挂起的任务续做;点击切换,对下一次额度墙生效"
-              onClick={() => {
-                void (async () => {
-                  const result = await callApi<QuotaSetResult>(props.connection, 'quotaSet', { value: !quotaResume }, 'task-quota')
-                  if (result.ok) setQuotaResume(result.resume)
-                  else boardStore.notify(`自动续做切换失败:${result.code}`)
-                })()
-              }}
+              title="额度重置后的自动续做设置(开关与续做会话)"
+              onClick={() => setQuotaOpen(true)}
             >
-              自动续做 {quotaResume ? '开' : '关'}
+              自动续做 {quota.resume ? '开' : '关'}{quota.target === 'origin' ? ' · 原会话' : quota.target === 'session' ? ' · 指定会话' : ''}
             </Button>
           )}
           <Button variant="primary" size="sm" icon={<IconPlusOutline16 />} onClick={() => setCreating(true)}>
@@ -272,6 +268,9 @@ export function BoardOverlay(props: { connection: ConnectionService; openSession
 
         {detailId !== undefined && (
           <DetailPopover connection={props.connection} openSession={props.openSession} taskId={detailId} onClose={() => setDetailId(undefined)} />
+        )}
+        {quotaOpen && quota !== undefined && (
+          <QuotaForm connection={props.connection} quota={quota} onQuota={setQuota} onClose={() => setQuotaOpen(false)} />
         )}
         {creating && payload !== undefined && (
           <CreateForm

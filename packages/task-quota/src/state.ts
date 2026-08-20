@@ -13,9 +13,26 @@ import { z } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
+import type { ResumeTarget } from './signal.ts'
 
 /** Storage key of the resume override inside the `flags` table. */
 const RESUME_KEY = 'resume-on-reset'
+/** Storage key of the resume-target override inside the `flags` table. */
+const TARGET_KEY = 'resume-target'
+
+/** One resume target as its stored string form. */
+function encodeTarget(target: ResumeTarget): string {
+  return target.kind === 'session' ? `session:${target.sessionId}` : target.kind
+}
+
+/** Parse a stored target string; undefined for anything malformed (treated as the fresh default). */
+function decodeTarget(raw: string | undefined): ResumeTarget | undefined {
+  if (raw === 'fresh' || raw === 'origin') return { kind: raw }
+  if (raw !== undefined && raw.startsWith('session:') && raw.length > 'session:'.length) {
+    return { kind: 'session', sessionId: raw.slice('session:'.length) }
+  }
+  return undefined
+}
 
 /**
  * The quota domain: one `flags` table mapping stable key to stored value. The
@@ -30,7 +47,7 @@ export const quotaDomainSpec = defineDomain({
   },
 })
 
-/** Read-and-write access to the resume override. */
+/** Read-and-write access to the resume override and the resume target. */
 export interface ResumeStore {
   /** The stored override; undefined while the toggle has never been flipped. */
   override(): boolean | undefined
@@ -40,15 +57,28 @@ export interface ResumeStore {
    * @returns resolution after the durable write.
    */
   set(value: boolean): Promise<void>
+  /** The stored target; undefined while it was never chosen (fresh default). */
+  target(): ResumeTarget | undefined
+  /**
+   * Record the target durably.
+   * @param target - the chosen continuation target.
+   * @returns resolution after the durable write.
+   */
+  setTarget(target: ResumeTarget): Promise<void>
 }
 
-/** Override with no medium: correct within one process, blank at the next boot. */
+/** Overrides with no medium: correct within one process, blank at the next boot. */
 export function memoryResume(): ResumeStore {
   let stored: boolean | undefined
+  let storedTarget: ResumeTarget | undefined
   return {
     override: () => stored,
     async set(value) {
       stored = value
+    },
+    target: () => storedTarget,
+    async setTarget(target) {
+      storedTarget = target
     },
   }
 }
@@ -70,6 +100,8 @@ export async function openResume(
         return stored === undefined ? undefined : stored === 'true'
       },
       set: value => table.put(RESUME_KEY, value ? 'true' : 'false'),
+      target: () => decodeTarget(table.get(TARGET_KEY)),
+      setTarget: target => table.put(TARGET_KEY, encodeTarget(target)),
     },
     close: () => domain.close(),
   }

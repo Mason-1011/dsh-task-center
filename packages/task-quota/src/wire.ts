@@ -13,11 +13,22 @@ export interface QuotaError {
   readonly message: string
 }
 
-/** `quotaGet` outcome: the effective resume knob. */
+/** Which session the reset-point continuation goes to. */
+export type ResumeTargetKind = 'fresh' | 'origin' | 'session'
+
+/** `quotaGet` outcome: the effective knob and its target. */
 export interface QuotaGetResult {
   readonly ok: true
   readonly resume: boolean
+  readonly target: ResumeTargetKind
+  /** The named session; present only while `target` is `session`. */
+  readonly session?: string
 }
 
 /** `quotaSet` outcome: success echoes the effective knob. */
 export type QuotaSetResult = { readonly ok: true; readonly resume: boolean } | QuotaError
+
+/** `quotaTargetSet` outcome: success echoes the effective target. */
+export type QuotaTargetSetResult =
+  | { readonly ok: true; readonly target: ResumeTargetKind; readonly session?: string }
+  | QuotaError

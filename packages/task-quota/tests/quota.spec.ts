@@ -24,6 +24,7 @@ import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { TaskService } from '@task-center/task'
+import { SchedBoardService } from '@task-center/task-sched'
 import { TaskQuotaService } from '../src/index.ts'
 import type { Config } from '../src/index.ts'
 import { decide, parkLine } from '../src/index.ts'
@@ -59,11 +60,13 @@ describe('quota decision', () => {
     }
   })
 
-  it('names the mover in the pack line per the resume knob', () => {
+  it('names the mover in the pack line per the resume knob and target', () => {
     const park = { kind: 'park', resetAt: '2026-08-17T13:00:00.000Z', from: 'provider' } as const
-    expect(parkLine(park)).toContain('到点自动唤醒续做')
+    expect(parkLine(park)).toContain('到点自动唤醒新会话续做')
+    expect(parkLine(park, true, { kind: 'origin' })).toContain('到点自动回原会话续做')
+    expect(parkLine(park, true, { kind: 'session', sessionId: 'abcdef123456' })).toContain('会话 abcdef12')
     expect(parkLine(park, false)).toContain('自动续做已关闭')
-    expect(parkLine(park, false)).not.toContain('到点自动唤醒续做')
+    expect(parkLine(park, false)).not.toContain('到点自动')
   })
 })
 
@@ -219,7 +222,7 @@ describe('task-quota guard', () => {
   it('parks without the wake rule when the knob is flipped off at runtime', { timeout: 10_000 }, async () => {
     // Config default stays on; only the runtime flip (the web toggle's path) turns it off.
     const ctx = await boot()
-    expect(ctx['task-quota'].quotaGet()).toEqual({ ok: true, resume: true })
+    expect(ctx['task-quota'].quotaGet()).toEqual({ ok: true, resume: true, target: 'fresh' })
     expect(await ctx['task-quota'].quotaSet(false)).toEqual({ ok: true, resume: false })
 
     const created = await ctx.tasks.create({ objective: 'o', acceptance: 'a' }, { kind: 'human' })
@@ -249,6 +252,48 @@ describe('task-quota guard', () => {
       ok: false, code: 'QUOTA_INVALID_VALUE', message: 'value 必须是布尔值',
     })
   })
+
+  it('parks the resume send into the origin session through the sched channel', { timeout: 10_000 }, async () => {
+    const ctx = await boot()
+    await ctx.plugin(SchedBoardService, { pollSeconds: 0.05, agent: { provider: 'fake-quota', model: 'm' } })
+    expect(await ctx['task-quota'].quotaTargetSet('origin', undefined)).toEqual({ ok: true, target: 'origin' })
+
+    const created = await ctx.tasks.create({ objective: 'o', acceptance: 'a' }, { kind: 'human' })
+    if ('code' in created) throw new Error(created.code)
+    const worker = ctx.agentLoop.create(SessionId('worker-5'), { provider: 'fake-quota', model: 'm' })
+    const claimed = await ctx.tasks.claim(created.task.record.id, worker.session, { kind: 'model', sessionId: worker.session.id })
+    if ('code' in claimed) throw new Error(claimed.code)
+
+    const idle = worker.whenIdle()
+    worker.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await idle.catch(() => undefined)
+
+    // Parked with the origin continuation armed: no wake rule, the pack says
+    // where the resume goes, and a pending send targets the dying session.
+    const parked = ctx.tasks.get(created.task.record.id)!
+    expect(parked.record.wakeRule).toBeUndefined()
+    expect(parked.record.contextPack).toContain('回原会话')
+    const sched = ctx.get('task-sched')!
+    const armed = sched.schedList().sends.find(send => send.sessionId === worker.session.id)
+    expect(armed?.status).toBe('pending')
+    expect(armed?.content).toContain('额度已恢复')
+    expect(armed?.content).toContain('task_claim')
+
+    // At reset the sched channel delivers into the live session; no fresh wake session ever starts.
+    await until(() => sched.schedList().sends.some(send => send.sessionId === worker.session.id && send.status === 'fired'))
+    expect(ctx.agents.list().some(agent => agent.session.id.startsWith('wake-'))).toBe(false)
+  })
+
+  it('rejects malformed resume targets at the wire', async () => {
+    const ctx = await boot()
+    expect(await ctx['task-quota'].quotaTargetSet('anywhere' as never, undefined)).toEqual({
+      ok: false, code: 'QUOTA_INVALID_TARGET', message: 'target 必须是 fresh / origin / session',
+    })
+    expect(await ctx['task-quota'].quotaTargetSet('session', '  ')).toEqual({
+      ok: false, code: 'QUOTA_INVALID_SESSION', message: '指定会话时 session 不能为空',
+    })
+    expect((await ctx['task-quota'].quotaTargetSet('session', 'sess-9'))).toEqual({ ok: true, target: 'session', session: 'sess-9' })
+  })
 })
 
 describe('task-quota resume knob store', () => {
@@ -268,11 +313,12 @@ describe('task-quota resume knob store', () => {
       const first = await bootDurable()
       await until(() => first['task-quota'].quotaGet().resume === true)
       expect(await first['task-quota'].quotaSet(false)).toEqual({ ok: true, resume: false })
+      expect(await first['task-quota'].quotaTargetSet('session', 'sess-1')).toEqual({ ok: true, target: 'session', session: 'sess-1' })
       await first.fiber.dispose()
 
       const second = await bootDurable()
       await until(() => second['task-quota'].quotaGet().resume === false)
-      expect(second['task-quota'].quotaGet().resume).toBe(false)
+      expect(second['task-quota'].quotaGet()).toEqual({ ok: true, resume: false, target: 'session', session: 'sess-1' })
     } finally {
       await rm(root, { recursive: true, force: true })
     }
