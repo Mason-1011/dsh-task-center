@@ -1,5 +1,6 @@
 {
   "name": "@task-center/task-local",
+  "license": "MIT",
   "version": "0.0.0",
   "private": true,
   "type": "module",

@@ -1,68 +1,78 @@
 # dsh-task-center
 
-> 个人任务指挥中心:[dsh(DeepSeek Harness)](https://github.com/deepseek-harness/deepseek-harness) 的任务全生命周期插件族。
-> **人管一摊长期任务,agent 跨会话认领并推进,定时自己醒来干活,进度对人类永远可见。**
+**English | [简体中文](README.zh-CN.md)**
 
-## 简介
+> A personal task command center for [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) — a full task-lifecycle plugin suite.
+> **You steer a long-lived backlog; agents claim tasks across sessions, wake themselves up on schedule to keep working, and progress stays visible to you at all times.**
 
-dsh(以及 Claude Code / Codex 这类 agent 工具)的工作单位是**会话**——会话结束,主动性就死。本仓库解决四类断点:
+![Task board](docs/images/board.png)
 
-- **跨时间**:任务一搁置便没了下文,隔段时间想续做,连当时的进展都难以找回;
-- **跨项目**:一个功能动三个仓库,三个会话互不知晓;
-- **跨窗口/设备**:能带走日志文件,带不走"进行中的工作";
-- **跨执行者**:人与子 agent 分头做,谁也不知道整体进度。
+## The problem it solves
 
-dsh-task-center 把任务做成**宿主外的一族插件**,同一份任务账本服务两类用户:**人**(看板看全景、验收裁决)与**模型**(认领任务、恢复上下文、推进汇报)。一句话:**面板负责"看见",工具负责"推进",闹钟负责"活着"。**
+Agent tools such as dsh, Claude Code, and Codex work in **sessions** — when a session ends, the initiative dies. Real work breaks across four seams:
 
-独立于 harness 主仓实现,只依赖其公开发布的 npm 包(`@deepseek-ai/cordis`、`@deepseek-ai/dsh-*`),不侵入主仓。完整设计档案见 [docs/design/](docs/design/)。
+- **Across time** — a parked task has no follow-up. Weeks later you can't even reconstruct where it stood.
+- **Across projects** — one feature touches three repos; three sessions know nothing about each other.
+- **Across windows / machines** — you can carry the log files, but not "work in progress".
+- **Across executors** — you and your sub-agents each do a piece, and nobody sees the whole.
 
-## 功能特性
+dsh-task-center turns the task into the durable unit, hosted **outside the harness as a family of plugins**. One shared task ledger serves two audiences: **you** (board for the full picture, acceptance verdicts) and **the model** (claim tasks, restore context, push forward, report back).
 
-- **任务全生命周期**——五态状态机(待办/进行中/阻塞/待验收/已完成),append-only 事件账本,所有变更 CAS 过版本号,重启即恢复;
-- **跨会话交接**——新会话认领任务时自动注入上下文包与 `PRIOR SESSIONS` 前序会话清单,不需要人复述背景;看板上每个会话 id 都可点击直达对话;
-- **子任务委派**——一个任务挂多个子任务,不同会话并行持有、各自推进,父任务聚合子进度;
-- **项目与工作区分组**——人类管理的项目 + 任务出生时自动盖戳的工作区目录,看板四类筛选(全部/项目/工作区/无分组);
-- **定时干活**——任务挂唤醒规则(一次/定点/周期),到点自动起新会话认领续干;每日巡检会话刷新全部未完结任务现状;看板详情与卡片直接展示已挂的唤醒规则与下次到点时间;
-- **定时发送**——会话页与看板详情均可定一条消息(内容默认 `cont`)与发送时间(附快捷片),到点自动作为用户输入送进目标会话,挂在半路的任务到点自己续上;
-- **额度感知**——API 额度用尽自动挂起并释放持有,额度重置点自动唤醒续做;阻塞卡片标注阻塞原因类别(额度/人工等);
-- **崩溃恢复**——持有任务的会话死亡(崩溃/被杀),自动释放持有,任务回到可认领;
-- **自动抽取**——闲置会话里的 goal/已批计划/todo 自动出生为候选,人确认晋升;做完却无人回应的 goal 直接进待验收;验收打回自动把理由推回原对话重做;
-- **双界面**——Web 全屏看板(五列、筛选、阻塞置顶、详情、新建)与 `/task` 命令面板读同一份账本。
+In one line: **the board makes work visible, the tools make progress, the alarm clock keeps tasks alive.**
 
-## 架构总览
+It is implemented independently of the harness repo and depends only on its published npm packages (`@deepseek-ai/cordis`, `@deepseek-ai/dsh-*`). Full design notes live in [docs/design/](docs/design/) (Chinese).
 
-任务数据采用**双账本**:权威事件流(`~/.dsh/storages/task.json`,append-only)+ 会话日志回执(`task/change`、`task/context-injected` 事件)——账本保证重启恢复与跨会话一致性,回执保证模型输入可从日志重建。
+## Features
 
-| 包 | 角色 | 说明 |
+- **Full task lifecycle** — five-state machine (todo / in-progress / blocked / awaiting-review / done), append-only event ledger, every change CAS-versioned, everything restored after a restart.
+- **Cross-session handover** — a new session that claims a task gets the context pack and a `PRIOR SESSIONS` list injected automatically; you never re-explain the background. Every session id on the board is clickable through to the conversation.
+- **Subtask delegation** — one task parents many subtasks; different sessions hold and advance them in parallel while the parent aggregates progress.
+- **Projects and workspaces** — human-managed projects plus a workspace directory stamped at task birth; the board filters four ways (all / project / workspace / ungrouped).
+- **Scheduled work** — a task can carry wake rules (one-shot / at-time / recurring); when the time comes, a fresh session is spawned, claims the task, and continues. A daily patrol session refreshes the state of every open task. Wake rules and their next fire time render on cards and in the detail dialog.
+- **Scheduled sends** — from the session page or the board detail, schedule a message (default `cont`) to be delivered into an existing session at a set time, with quick presets — a task parked mid-flight picks itself up.
+- **Quota awareness** — when API quota runs out, tasks suspend and release their holders; at the quota reset point they wake and resume. Blocked cards label the reason category (quota / human / …).
+- **Crash recovery** — when a session holding a task dies (crash or kill), the hold is released automatically and the task becomes claimable again.
+- **Automatic extraction** — goals, approved plans, and todo tables left in idle sessions birth task candidates for you to confirm and promote; a goal completed with no human response goes straight to awaiting-review; a rejection pushes the reason back into the original conversation and re-claims it for rework.
+- **Two frontends** — a full-screen web kanban (five columns, filters, blocked pinned on top, detail dialog, creation) and a `/task` command panel, both reading the same ledger.
+
+### Killer flow: mine tasks out of your old chats
+
+Pair it with [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import): import your Claude Code / Codex history as resumable dsh sessions, and task-center's extractor will summarize each idle conversation, judge whether it left unfinished work behind (a nameable result, a checkable acceptance, a real intent to continue), and birth the survivors as candidates on the board — no manual triage.
+
+## Architecture
+
+Task data uses a **double ledger**: the authoritative append-only event stream (`~/.dsh/storages/task.json`) plus session-log receipts (`task/change`, `task/context-injected` events) — the ledger survives restarts and keeps sessions consistent; the receipts keep every model input reconstructable from the logs.
+
+| Package | Role | What it does |
 |---|---|---|
-| [`task`](packages/task) | 核心(Service) | `ctx.tasks`:状态机、项目、子任务、contextPack、事件;`workspacePath` 出生盖戳 |
-| [`task-local`](packages/task-local) | 存储 Provider | 经 storage-domain 开域,后端路由 json/sqlite |
-| [`tool-task`](packages/tool-task) | 模型面(Consumer) | 七个模型工具 + 提示词段 |
-| [`command-task`](packages/command-task) | 人类面(Consumer) | `/task` 命令:面板、项目、候选看管 |
-| [`task-web`](packages/task-web) | 人类面(Consumer) | Web 看板:Typert 服务 + 浏览器 bundle |
-| [`task-wake`](packages/task-wake) | 时间面(Provider) | 到点起新会话干活 + 每日巡检 |
-| [`task-sched`](packages/task-sched) | 时间面(Provider) | 定时发送:到点向既有会话投用户消息(默认 `cont`) |
-| [`task-quota`](packages/task-quota) | 额度(Provider) | QUOTA 失败挂起释放,重置点续做 |
-| [`task-reaper`](packages/task-reaper) | 存活(Provider) | 释放死持有,崩溃恢复 |
-| [`task-source`](packages/task-source) | 抽取(Provider) | 扫描闲置会话产候选;回合末差分回流;验收出生与打回回流 |
-| [`shell`](packages/shell) | 独立 REPL 壳 | 一条命令组装全部插件的交互启动器 |
+| [`task`](packages/task) | Core (Service) | `ctx.tasks`: state machine, projects, subtasks, contextPack, events; stamps `workspacePath` at birth |
+| [`task-local`](packages/task-local) | Storage Provider | Opens the storage domain; backend routes to json/sqlite |
+| [`tool-task`](packages/tool-task) | Model face (Consumer) | Seven model tools + prompt section |
+| [`command-task`](packages/command-task) | Human face (Consumer) | `/task` command: panel, projects, candidate triage |
+| [`task-web`](packages/task-web) | Human face (Consumer) | Web board: Typert service + browser bundle |
+| [`task-wake`](packages/task-wake) | Time face (Provider) | Spawns working sessions on schedule + daily patrol |
+| [`task-sched`](packages/task-sched) | Time face (Provider) | Scheduled sends: injects a user message into an existing session at the set time (default `cont`) |
+| [`task-quota`](packages/task-quota) | Quota (Provider) | Suspends and releases on QUOTA failures, resumes at reset |
+| [`task-reaper`](packages/task-reaper) | Liveness (Provider) | Releases dead holds, crash recovery |
+| [`task-source`](packages/task-source) | Extraction (Provider) | Scans idle sessions for candidates; end-of-turn diffs flow back; acceptance births and rejection push-backs |
+| [`shell`](packages/shell) | Standalone REPL | One-command interactive launcher assembling every plugin |
 
 ```
-docs/design/   设计档案(产品定义、数据模型、接缝规格、计划、抽取层)
-packages/      @task-center/* 插件包(pnpm workspace)
+docs/design/   Design archive (product definition, data model, seam specs, plan, extraction layer — Chinese)
+packages/      @task-center/* plugin packages (pnpm workspace)
 ```
 
-## 安装
+## Install
 
-前置:已全局安装 [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh)(`npm i -g @deepseek-ai/dsh`),且 `dsh plugin` 能找到 `pnpm`(corepack 用户:`corepack enable`;若 node 目录无写权限,`corepack enable --install-directory <目录>` 后把该目录挂上 PATH)。
+Requires dsh ≥ 0.1.0-rc.8. Prerequisite: the [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh) installed globally (`npm i -g @deepseek-ai/dsh`), with `pnpm` reachable by `dsh plugin` (corepack users: `corepack enable`; if the node directory is not writable, `corepack enable --install-directory <dir>` and put that dir on PATH).
 
-**1. 构建**(Node 不做 `node_modules` 下的 `.ts` 类型擦除,插件必须以 JS 产物装入 profile):
+**1. Build** (Node does not type-strip `.ts` under `node_modules`, so plugins must be loaded as built JS into the profile):
 
 ```sh
-corepack pnpm install && corepack pnpm run build   # 产出 packages/*/dist
+corepack pnpm install && corepack pnpm run build   # produces packages/*/dist
 ```
 
-**2. 装包**(从仓库根装入;`shell` 除外——它是自带 REPL 的独立启动器,与 dsh 运行模式冲突):
+**2. Add the packages** (from the repo root; all except `shell` — that one is a standalone REPL launcher that conflicts with dsh run modes):
 
 ```sh
 dsh plugin --profile headless add \
@@ -77,12 +87,12 @@ dsh plugin --profile web add \
   file:./packages/task-source file:./packages/task-sched
 ```
 
-profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板,其他名字从 `dsh-base` 起)。
+A profile is initialized from its template on first use (`web` / `headless` ship templates; other names start from `dsh-base`).
 
-**3. 注册插件行**:写进 `~/.dsh/profiles/<name>/cordis.patch.yml`(不是 `cordis.yml`,那是空根)。headless 需附带 storage 三行;web bundle 自带 storage,**不要重插**(duplicate id 会大声失败),从下模板删掉前三行即可。
+**3. Register the plugin rows** in `~/.dsh/profiles/<name>/cordis.patch.yml` (not `cordis.yml` — that one is an empty root). headless needs the three storage rows too; the web bundle ships storage, so **do not re-insert them** (a duplicate id fails loudly) — just drop the first three lines from the template below.
 
 <details>
-<summary>cordis.patch.yml 模板(headless)</summary>
+<summary>cordis.patch.yml template (headless)</summary>
 
 ```yaml
 - insert:
@@ -91,7 +101,7 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
     - id: storage-json
       name: '@deepseek-ai/dsh-storage-json'
       config:
-        root: !!js dshHomePath('storages')   # 与 web bundle 同根:两个 profile 共用一份任务账本
+        root: !!js dshHomePath('storages')   # same root as the web bundle: both profiles share one task ledger
     - id: storage-domain
       name: '@deepseek-ai/dsh-storage-domain'
       config:
@@ -141,41 +151,41 @@ profile 首次使用会自动从模板初始化(`web`/`headless` 有随附模板
 
 </details>
 
-**4. 验证组合树**:
+**4. Validate the composition tree**:
 
 ```sh
-dsh --profile <name> --dump-config   # 不启动,只检查组合树
+dsh --profile <name> --dump-config   # no start, just checks the tree
 ```
 
-## 使用
+## Usage
 
 ```sh
-export DEEPSEEK_API_KEY=...          # 或在 web 的 Models 页保存
-dsh --profile headless "某任务"       # 一次性:建 agent、干活、打印结果、退出
-dsh web                              # 浏览器 UI:任务工具进模型,/task 命令面进人类
+export DEEPSEEK_API_KEY=...          # or save it on the web Models page
+dsh --profile headless "some task"   # one-shot: build an agent, work, print, exit
+dsh web                              # browser UI: task tools for the model, /task command for you
 ```
 
-### 模型工具(tool-task)
+### Model tools (tool-task)
 
-| 工具 | 作用 |
+| Tool | Effect |
 |---|---|
-| `task_create` | 建任务(objective / acceptance),可挂父任务或归入项目;出生工作区由会话目录自动盖戳 |
-| `task_claim` | 认领并取回完整上下文包;注入前序会话清单 |
-| `task_update` | 记一条进展(note / next),自动解除阻塞 |
-| `task_report` | 上报:blocked(附理由)或 review(附对照验收标准的自检) |
-| `task_patrol` | 记巡检观察:不认领、不改状态、不刷新闲置时钟 |
-| `task_query` | 按 status / workspace_path / project_id 过滤;按父任务列存活子任务 |
-| `task_projects` | 列人类管理的项目(创建序,含归档标记) |
+| `task_create` | Create a task (objective / acceptance), optionally under a parent or in a project; the birth workspace is stamped from the session directory |
+| `task_claim` | Claim and receive the full context pack; injects the prior-sessions list |
+| `task_update` | Record progress (note / next); clears blocked state |
+| `task_report` | Report: blocked (with reason) or review (with a self-check against the acceptance criteria) |
+| `task_patrol` | Record a patrol observation: claims nothing, changes no state, does not refresh the idle clock |
+| `task_query` | Filter by status / workspace_path / project_id; list live subtasks of a parent |
+| `task_projects` | List human-managed projects (creation order, with archive flag) |
 
-### 人类动作
+### Human actions
 
-验收裁决(approve / reject)、释放、弃置、阻塞、项目建改归档、候选晋升——全部仅人类可操作,模型工具面不注册这些动词。Web 看板与 `/task` 命令面走同一个人动作面,冲突即刷新不覆盖。验收打回时,理由自动作为用户消息推回原对话并代为认领重做。
+Acceptance verdicts (approve / reject), release, archive, block, project CRUD, candidate promotion — all human-only; the model tool face does not register these verbs. The web board and the `/task` command panel share the same human action face; a conflict refreshes rather than overwrites. On a rejected acceptance, the reason is pushed back into the original conversation as a user message and the task is re-claimed for rework.
 
-### Web 看板(task-web)
+### Web board (task-web)
 
-侧栏底栏「任务看板」点开全屏五列看板(待办/进行中/阻塞/待验收/已完成),附「待确认」候选收件箱。筛选栏:全部 / 项目 / 工作区(任务出生目录)/ 无分组;详情弹窗含验收标准、历史对话(可点击直达会话页)、子任务、上下文包尾部、定时唤醒规则与定时发送栏。阻塞卡片与详情标注阻塞原因类别(额度/人工等)。⚠ 横幅提示 `staleDays` 天内最久未动的开放任务(闲置按子树取新鲜值,委派进行中不算搁置)。
+Open the full-screen five-column board (todo / in-progress / blocked / awaiting-review / done) from the sidebar footer, with the pending-candidates inbox. Filters: all / project / workspace (birth directory) / ungrouped. The detail dialog shows acceptance criteria, past conversations (clickable through to the session page), subtasks, the context-pack tail, wake rules, and scheduled sends. Blocked cards and details label the reason category (quota / human / …). A ⚠ banner names the open task left untouched longest within `staleDays` (idle computed over the subtree, freshest wins; delegation in progress does not count as idle).
 
-web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
+Append to the web profile's `cordis.patch.yml` after the command-task row:
 
 ```yaml
     - id: task-web
@@ -191,47 +201,47 @@ web profile 的 `cordis.patch.yml` 在 command-task 行后追加:
           model: !!js process.env.TASK_CENTER_MODEL ?? 'deepseek-v4-flash'
 ```
 
-## 配置
+## Configuration
 
-| 字段 | 所属插件 | 默认 | 说明 |
+| Field | Plugin | Default | Meaning |
 |---|---|---|---|
-| `contextPackByteLimit` | task | — | 上下文包字节上限 |
-| `listDefaultLimit` | task | — | list/query 默认返回上限 |
-| `pollSeconds` | task-source / task-wake / task-sched | 30 | 扫描/唤醒/发送轮询间隔 |
-| `idleHours` | task-source | 3 | 会话闲置判定窗口 |
-| `summariesPerTick` | task-source | 2 | 每轮总结会话上限(装机风暴防护) |
-| `transcriptEvents` | task-source | 40 | 总结提示词携带的近端消息条数 |
-| `staleDays` | command-task / task-web | 3 | 搁置告警阈值(天) |
-| `patrol.at` | task-wake | — | 每日巡检时刻(如 `'09:30'`;错过即跳过) |
-| `agent` | task-source / task-wake / task-sched | — | 唤醒/总结/定时发送会话的路由(provider + model) |
+| `contextPackByteLimit` | task | — | Context-pack byte limit |
+| `listDefaultLimit` | task | — | Default list/query cap |
+| `pollSeconds` | task-source / task-wake / task-sched | 30 | Scan / wake / send poll interval |
+| `idleHours` | task-source | 3 | Session idle window |
+| `summariesPerTick` | task-source | 2 | Max summary sessions per tick (install-storm guard) |
+| `transcriptEvents` | task-source | 40 | Recent messages carried into the summary prompt |
+| `staleDays` | command-task / task-web | 3 | Stale-warning threshold in days |
+| `patrol.at` | task-wake | — | Daily patrol time (e.g. `'09:30'`; a missed slot is skipped) |
+| `agent` | task-source / task-wake / task-sched | — | Route (provider + model) for wake / summary / scheduled-send sessions |
 
-## 开发
+## Development
 
 ```sh
 pnpm install
-pnpm run build       # 全量构建(含 web client bundle)
-pnpm run test        # 构建 + vitest;真模型 e2e 无 DEEPSEEK_API_KEY 时自跳过
+pnpm run build       # full build (includes the web client bundle)
+pnpm run test        # build + vitest; real-model e2e self-skips without DEEPSEEK_API_KEY
 pnpm run typecheck
 ```
 
-独立 REPL 壳(不经 dsh profile,默认账本 `~/.dsh-task-center`):
+Standalone REPL shell (no dsh profile; default ledger `~/.dsh-task-center`):
 
 ```sh
-corepack pnpm start                  # 也可 --root <目录> 指定工作根
+corepack pnpm start                  # or --root <dir> for a custom working root
 ```
 
-### 常见问题与坑
+### Gotchas
 
-- **改了插件源码**:`corepack pnpm run build` 后,对 profile 先 `remove` 再 `add` 同一批包——pnpm 缓存 `file:` 拷贝,`--force` 刷不掉;
-- **改了 web 客户端代码**:client bundle 的判定与版本按进程缓存,必须 build 后**重启** `dsh web`;`dist/client.js` 必须先于组合行存在(声明的 client 包缺 bundle 会让整个 web 启动失败),所以永远先 build 再 add;headless profile 不装 task-web(无 client 消费者);
-- **patch 插入的行必须带显式 `config`**(空也给 `{}`):patch 路径不把缺失 config 归一化,apply 直读 config 的插件(如 task-quota)会当场崩;
-- **账本位置**:dsh profile 共用 `~/.dsh/storages`;独立 REPL 壳默认 `~/.dsh-task-center`,两者互不相通。
-- **task-sched 只装 web profile**:同一张发送表同一时刻只应有一个进程轮询(两个运行器会对同一行各投一次),headless 与独立壳不装;不装的 profile 仍可通过 web 界面下发送。
+- **Changed plugin source**: after `corepack pnpm run build`, `remove` then `add` the same packages into the profile — pnpm caches `file:` copies and `--force` does not refresh them.
+- **Changed web client code**: the client bundle's verdict and version are cached per process; after a build you must **restart** `dsh web`. `dist/client.js` must exist before the composition row (a declared client package missing its bundle fails the whole web start), so always build before add. The headless profile does not install task-web (no client consumer).
+- **Rows inserted by patch must carry an explicit `config`** (`{}` when empty): the patch path does not normalize a missing config, and a plugin reading config directly in apply (e.g. task-quota) crashes on the spot.
+- **Ledger location**: dsh profiles share `~/.dsh/storages`; the standalone REPL shell defaults to `~/.dsh-task-center`. The two never meet.
+- **task-sched goes only in the web profile**: one send table should have exactly one polling process at a time (two runners would each deliver the same row). headless and the standalone shell omit it; profiles without it can still schedule sends through the web UI.
 
-## 路线图
+## Roadmap
 
-实现进度与分期见 [docs/design/04-plan.md](docs/design/04-plan.md):P0/P1、抽取层(6a–6f,含验收出生与打回回流)、进度回流三层、看板历史对话与工作区融合均已落地。当前里程碑:**真实使用一周**,按实际痛点迭代。
+Implementation status and phases: [docs/design/04-plan.md](docs/design/04-plan.md) (Chinese). P0/P1, the extraction layer (6a–6f, including acceptance births and rejection push-backs), the three progress-flowback layers, and board history/workspace fusion have all landed. Current milestone: **one week of real daily use**, iterating on actual pain.
 
-## 许可
+## License
 
-尚未设定开源许可证(私有仓库)。
+[MIT](LICENSE)
