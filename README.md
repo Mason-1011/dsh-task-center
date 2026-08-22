@@ -73,27 +73,15 @@ packages/      dsh-task-center-* plugin packages (pnpm workspace)
 
 Requires dsh ≥ 0.1.0-rc.8. Prerequisite: the [dsh CLI](https://www.npmjs.com/package/@deepseek-ai/dsh) installed globally (`npm i -g @deepseek-ai/dsh`), with `pnpm` reachable by `dsh plugin` (corepack users: `corepack enable`; if the node directory is not writable, `corepack enable --install-directory <dir>` and put that dir on PATH).
 
-Clone, build, and add the single bundle package (no npm needed; the published package is landing, and the one-liner at the end takes over once it is live):
-
-```sh
-git clone https://github.com/Mason-1011/dsh-task-center && cd dsh-task-center
-corepack pnpm install && corepack pnpm run build   # produces packages/*/dist + packages/bundle/dist
-dsh plugin --profile web add "file:$(pwd)/packages/bundle"
-```
-
-The `web` profile (created by `dsh web` on first run) already carries the storage rows this set rides, at the shared `~/.dsh/storages` root — the package never inserts them, so a duplicate storage stack cannot happen. A fresh, non-web profile adds the three storage rows itself first ([snippet](packages/bundle/README.md)); without them the boot fails loudly, never silently. Every plugin row lands with a deployment default; override any row by `id` in the profile's own `cordis.patch.yml` (a later layer replaces the whole `config`).
-
-Validate the composition tree without booting:
-
-```sh
-dsh --profile <name> --dump-config
-```
-
-The 0.1.0 multi-package family (`dsh-task-center-task` etc.) is deprecated; one `dsh-task-center` package replaces all of it. Once that package is live on npm, the clone-free path is:
+One package from npm — it bundles every plugin and its default rows, no clone, no build:
 
 ```sh
 dsh plugin --profile web add dsh-task-center
 ```
+
+The `web` profile (created by `dsh web` on first run) already carries the storage rows this set rides, at the shared `~/.dsh/storages` root — the package never inserts them, so a duplicate storage stack cannot happen. A fresh, non-web profile adds the three storage rows itself first ([snippet](packages/bundle/README.md)); without them the boot fails loudly, never silently. Every plugin row lands with a deployment default; override any row by `id` in the profile's own `cordis.patch.yml` (a later layer replaces the whole `config`).
+
+The 0.1.0 multi-package family (`dsh-task-center-task` etc.) is deprecated; one `dsh-task-center` package replaces all of it.
 
 Then set `DEEPSEEK_API_KEY` (or save it through the web UI's Models page) and go:
 
@@ -101,6 +89,25 @@ Then set `DEEPSEEK_API_KEY` (or save it through the web UI's Models page) and go
 dsh web                          # browser UI; the board entry appears in the sidebar footer
 dsh --profile web "some task"    # one-shot: create agent, work, print, exit
 ```
+
+<details>
+<summary>From source (development)</summary>
+
+Clone, build, and add the bundle package directly (the same artifact the npm package ships):
+
+```sh
+git clone https://github.com/Mason-1011/dsh-task-center && cd dsh-task-center
+corepack pnpm install && corepack pnpm run build   # produces packages/*/dist + packages/bundle/dist
+dsh plugin --profile web add "file:$(pwd)/packages/bundle"
+```
+
+Validate the composition tree without booting:
+
+```sh
+dsh --profile <name> --dump-config
+```
+
+</details>
 
 ## Usage
 
